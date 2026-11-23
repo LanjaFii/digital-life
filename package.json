@@ -1,0 +1,69 @@
+{
+  "name": "digital-life",
+  "version": "0.1.0",
+  "description": "Simulateur de vie autonome multi-agents (Electron + React + TypeScript)",
+  "private": true,
+  "main": "dist/main/main.js",
+  "author": "DIGITAL LIFE",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/test.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "check:deps": "node scripts/check-deps.mjs",
+    "copy:wasm": "node scripts/copy-wasm.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "1.78.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "recharts": "3.11.0",
+    "sql.js": "1.17.0",
+    "zustand": "5.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/sql.js": "^1.4.9",
+    "@vitejs/plugin-react": "6.3.0",
+    "electron": "45.4.1",
+    "electron-builder": "26.18.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.8",
+    "vitest": "5.1.1"
+  },
+  "build": {
+    "appId": "com.digitallife.simulator",
+    "productName": "DIGITAL LIFE",
+    "directories": {
+      "output": "build",
+      "app": "dist"
+    },
+    "files": [
+      "main/**/*",
+      "preload/**/*",
+      "renderer/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/sqlite/sql-wasm.wasm",
+        "to": "sqlite/sql-wasm.wasm"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Education"
+    }
+  }
+}

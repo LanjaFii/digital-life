@@ -1,0 +1,45 @@
+# Dépendances / runtime portable
+node_modules/
+.tools/
+
+# Build / sortie
+dist/
+build/*
+!build/.gitkeep
+
+# Données locales (sauvegardes, settings, backups, SQLite générés)
+data/*
+!data/.gitkeep
+!data/saves/
+!data/backups/
+!data/settings/
+data/saves/*
+!data/saves/.gitkeep
+data/backups/*
+!data/backups/.gitkeep
+data/settings/*
+!data/settings/.gitkeep
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Secrets / config locale
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs / caches / OS / IDE
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.cache/
+.tmp/
+tmp/
