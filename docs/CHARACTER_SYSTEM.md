@@ -1,46 +1,70 @@
-# Système de personnages — [Planifié, phase 2]
+# Système de personnages
 
-Un personnage est un agent autonome complet, pas une fiche à trois statistiques.
+## État actuel (Phase 1 - fondation)
 
-## Identité
+La génération initiale de personnages est implémentée pour les mondes `generationMode=random`.
+Les personnages sont générés de manière déterministe (seed du monde + paramètres) et persistés en SQLite dans `data/saves/worlds.sqlite`, table `characters`, isolés par `world_id`.
 
-ID, nom, prénom, âge, date de naissance, sexe fictif, description, biographie,
-profession, statut (ALIVE/DEAD), date de création.
+Les systèmes de simulation (décisions, interactions, évolution dynamique, mémoire, mort) restent **[Planifié]**.
 
-## Personnalité
+## Échelles numériques
 
-Traits numériques 0-100 : introversion, extraversion, empathie, agressivité,
-patience, impulsivité, curiosité, intelligence, créativité, honnêteté, altruisme,
-égoïsme, ambition, courage, timidité, méfiance, sociabilité, sensibilité,
-résilience, humour, jalousie, tolérance, discipline, optimisme, pessimisme,
-besoin de contrôle, indépendance, loyauté.
+- **Traits de personnalité** : entier `0-100` (0 = très faible, 50 = neutre/moyen, 100 = très fort).
+- **Émotions** : entier `0-100` (0 = absent, 100 = intense).
+- **Besoins** : entier `0-100` (100 = besoin satisfait, 0 = critique).
+- **Âge** : entier plausible `18-65` à la génération initiale.
 
-Big Five : ouverture, conscienciosité, extraversion, agréabilité, neuroticisme.
-L'extraversion est partagée avec la liste ci-dessus : une seule valeur est stockée
-et réutilisée, pour éviter les doublons conceptuels dans les calculs.
+## Modèle implémenté
 
-## Émotions et régulation
+### Identité
+- `id` (string, unique)
+- `worldId` (string, FK logique vers le monde)
+- `firstName`, `lastName`
+- `age`
+- `gender` (`female | male | nonbinary`)
+- `biography` (courte, générée)
+- `createdAt`
 
-Bonheur, tristesse, stress, anxiété, colère, peur, confiance, solitude,
-motivation, satisfaction, sécurité, fatigue mentale. Chaque émotion possède une
-valeur 0-100, une vitesse de retour à la ligne de base et des interactions
-(ex. : la tristesse réduit la motivation). La régulation dépend de la résilience,
-du sommeil et du soutien social.
+### Traits (0-100)
+`sociability`, `empathy`, `aggression`, `patience`, `impulsivity`, `curiosity`,
+`intelligence`, `creativity`, `honesty`, `altruism`, `ambition`, `courage`,
+`timidity`, `distrust`, `optimism`, `humor`, `jealousy`, `discipline`,
+`independence`, `loyalty`, `resilience`.
 
-## Besoins
+### Émotions initiales (0-100)
+`happiness`, `sadness`, `stress`, `anxiety`, `anger`, `fear`, `confidence`,
+`loneliness`, `motivation`, `satisfaction`.
 
-Faim, soif, énergie, sommeil, santé, hygiène, socialisation, sécurité, repos.
-Ils dérivent avec le temps selon l'activité, le lieu et les ressources disponibles.
-Un besoin critique génère une forte pression sur la décision.
+### Besoins initiaux (0-100, 100=satisfait)
+`hunger`, `thirst`, `energy`, `sleep`, `health`, `hygiene`, `socialization`, `safety`.
 
-## Préférences et objectifs
+### Objectifs
+- 1 objectif principal (`kind: primary`)
+- 2 objectifs secondaires (`kind: secondary`)
+- Chaque objectif a `id`, `label`, `kind`.
 
-Activités favorites/détestées, nourriture, lieux, types de personnalité appréciés
-ou évités, préférences sociales, peurs. Objectifs courts, moyens et longs terme,
-avec progression et possibilité de remplacement.
+## Génération déterministe
 
-## Personnalité évolutive
+- Générateur PRNG seedé (`mulberry32`) dans `src/main/services/prng.ts`.
+- Aucun `Math.random()` dans le générateur de personnages.
+- Même seed + mêmes paramètres => mêmes personnages.
+- Les traits sont contraints pour limiter les incohérences évidentes (ex. sociabilité/timidité, agressivité/empathie, patience/impulsivité).
 
-Les traits changent par petites valeurs (par exemple +1 de méfiance après une
-trahison), jamais de façon arbitraire. Chaque modification est journalisée avec
-sa cause et son cycle.
+## Persistance
+
+- Table SQLite `characters` avec colonnes identité + JSON (`traits_json`, `emotions_json`, `needs_json`, `goals_json`).
+- Isolation par `world_id`.
+- Suppression des personnages lors de la suppression du monde.
+- Rechargement après redémarrage via SQLite.
+
+## API / IPC
+
+- Canal IPC : `character:list` (`IPC_CHANNELS.CHARACTER_LIST`).
+- Preload : `window.digitalLife.listCharacters(worldId)`.
+- Validation Main : `worldId` doit être une chaîne non vide.
+
+## [Planifié]
+
+- Évolution dynamique des traits/émotions/besoins.
+- Relations, mémoire, décisions, événements, mort.
+- Éditeur de personnage et ajout manuel après création du monde.

@@ -3,8 +3,9 @@
 ## État actuel
 
 - **Phase** : Phase 1 — Menu principal et gestion des mondes (en cours).
-- **Avancement approximatif** : 35 % (Phase 1).
+- **Avancement approximatif** : 55 % (Phase 1).
 - **Dernière mise à jour** : 2026-11-23.
+- **Git** : dépôt initialisé, remote `git@github.com:LanjaFii/digital-life.git`, branche `main` suivie, commit initial `73cfcb5` poussé et vérifié sur `origin/main`.
 
 ## Fonctionnalités terminées
 
@@ -29,40 +30,41 @@
 - [x] Création de monde UI : nom, seed aléatoire ou personnalisée, mode monde vide/personnages aléatoires, nombre de personnages configurable (1-50) en mode aléatoire.
 - [x] Suppression de monde avec confirmation modale.
 - [x] Bouton "Reprendre" visible mais désactivé (non implémenté).
-- [ ] Génération effective des personnages aléatoires dans la sauvegarde monde (Phase 1/2).
-- [ ] Reprise/chargement réel d'une simulation sauvegardée.
+- [x] Génération effective des personnages aléatoires : modèle personnage initial (identité, 21 traits, 10 émotions, 8 besoins, objectifs), PRNG seedé déterministe, persistance SQLite table `characters` isolée par `world_id`, IPC/preload `listCharacters`.
+- [ ] Reprise/chargement réel d'une simulation sauvegardée (écran/état dédié, sans moteur).
 
 ## Fonctionnalités non commencées
 
-- [ ] Phase 1 : menu principal, création et gestion des mondes, sauvegardes SQLite.
-- [ ] Phase 2 : personnages complets.
+- [ ] Phase 1 (reste) : reprise/chargement réel d'un monde sauvegardé ; ajout manuel de personnages dans un monde vide (ultérieur).
+- [ ] Phase 2 : personnages complets (évolution dynamique, édition avancée).
 - [ ] Phase 3 : moteur de simulation dans un worker.
 - [ ] Phases 4 à 8 : relations/mémoire, mort, LLM, interface avancée, stabilisation.
 
-## Fichiers créés (Phase 0)
+## Fichiers créés (Phase 0 / Phase 1)
 
-Voir `find . -type f` dans le projet. Principaux : `package.json`, `vite.config.ts`,
-`tsconfig*.json`, `scripts/*`, `src/main/**`, `src/preload/**`, `src/renderer/**`,
-`src/shared/**`, `index.html`, `AGENTS.md`.
+Principaux Phase 0 : `package.json`, `vite.config.ts`, `tsconfig*.json`, `scripts/*`,
+`src/main/**`, `src/preload/**`, `src/renderer/**`, `src/shared/**`, `index.html`, docs.
+
+Ajouts Phase 1 (menu + personnages) :
+- `src/shared/world.ts`, `src/shared/character.ts`
+- `src/main/services/world-store.service.ts`, `src/main/services/prng.ts`, `src/main/services/character-generator.service.ts`
+- `src/main/ipc/world.ipc.ts`
+- `src/renderer/components/CreateWorldDialog.tsx`
+- `tests/world-store.test.ts`, `tests/character-generation.test.ts`
 
 ## Fichiers modifiés
 
-- `tsconfig.base.json` : correction `allowSynthethicDefaultImports` → `allowSyntheticDefaultImports`.
-- `tsconfig.test.json` : ajout `jsx: react-jsx` pour typecheck des fichiers `.tsx`.
-- `src/main/ipc/app.ipc.ts` : correction de commentaire.
-- `scripts/check-deps.mjs` : avertissement non bloquant si seul le binaire Electron manque (build/typecheck/test restent possibles hors réseau).
-- `scripts/dev.mjs` : lancement d'Electron avec la racine projet (`ROOT`) pour que `app.getAppPath()` résolve correctement le projet.
-- `scripts/build.mjs` : preload bundlé avec Rolldown (pas de `require` relatif externe dans le preload sandboxé).
-- `src/main/services/resource.service.ts` : résolution WASM robuste (`app.getAppPath()` puis fallback `process.cwd()`).
-- Docs : `docs/TROUBLESHOOTING.md`, `docs/LLM_CONFIGURATION.md`, `AGENTS.md` (typos mineures corrigées).
+- Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
+- Phase 1 menu : `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/main.ts`, `src/renderer/App.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`.
+- Phase 1 personnages : `src/shared/ipc.ts` (canal `character:list`), `src/shared/world.ts`, `src/main/services/world-store.service.ts` (table `characters`, migration, génération/persistance/liste/suppression), `src/main/ipc/world.ipc.ts`, `src/preload/preload.ts`, `tests/phase0.test.ts`, `docs/CHARACTER_SYSTEM.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 
 ## Tests réussis
 
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **12/12 tests passés** (`tests/phase0.test.ts`, `tests/world-store.test.ts`).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **20/20 tests passés** (`tests/phase0.test.ts`, `tests/world-store.test.ts`, `tests/character-generation.test.ts`).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
-- Smoke test CDP (2026-11-23, env restreint, flags Electron de diagnostic) : menu rendu, `Créer un monde` présent, état vide/liste géré, création monde via IPC visible dans l'UI, bouton `Reprendre` désactivé, bouton `Supprimer` présent.
+- Smoke test CDP UI menu (2026-11-23, env restreint, flags Electron de diagnostic) : menu rendu, création/suppression/reprendre désactivé vérifiés.
 
 ## Tests échoués
 
@@ -82,4 +84,4 @@ Voir `find . -type f` dans le projet. Principaux : `package.json`, `vite.config.
 
 ## Prochaine tâche précise
 
-Phase 1 suite : implémenter la **génération effective des personnages aléatoires** lors de la création d'un monde en mode aléatoire (structure de données personnage minimale, persistance dans la sauvegarde monde, pas encore de simulation). Puis préparer la reprise/chargement d'un monde (écran/état dédié, sans moteur).
+Phase 1 suite : implémenter la **reprise/chargement réel d'un monde sauvegardé** (écran/état dédié lecture seule affichant métadonnées monde + personnages générés, sans moteur de simulation). Ensuite préparer l'ajout manuel de personnages dans un monde vide.

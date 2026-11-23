@@ -5,9 +5,9 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 en cours (menu principal + persistance mondes SQLite).
+> **Statut** : Phase 0 validée, Phase 1 en cours (menu principal + génération/persistance personnages SQLite).
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
-> tests (12/12), build et smoke test IPC/UI validés. Le code réel et `PROGRESS.md` fait foi.
+> tests (20/20), build et smoke test IPC/UI validés. Le code réel et `PROGRESS.md` fait foi.
 
 ## Fonctionnalités
 

@@ -2,30 +2,32 @@
 
 ## Où en est le développement
 
-Phase 0 validée. Phase 1 en cours : menu principal fonctionnel (liste/création/suppression) branché sur SQLite local.
-Node portable local v26.13.1, dépendances npm, WASM sql.js, Electron 45.4.1 linux-x64 (SHA-256 vérifié) présents.
+Phase 0 validée. Phase 1 en cours : menu principal + génération/persistance initiale des personnages.
+Git : `main` suit `origin/main`, commit initial `73cfcb5` poussé et vérifié. La tranche personnages est en cours de finalisation (commit/push à faire après validation).
 
 ## Ce qui vient d'être réalisé
 
-- Menu principal UI (`src/renderer/App.tsx`, `styles/global.css`) : ambiance sombre/immersive, liste des mondes SQLite, états chargement/erreur/vide, diagnostic système masquable.
-- Création monde : `CreateWorldDialog` (nom, seed aléatoire/personnalisée, mode vide/aléatoire, nombre de personnages 1-50).
-- Suppression : confirmation modale avant suppression.
-- Reprise : bouton visible mais désactivé (non implémenté).
-- Backend étendu : `generationMode` dans `WorldSummary/CreateWorldInput/DB`, migration légère `generation_mode`, validation IPC.
-- Tests : 12/12 passés ; typecheck/build OK ; smoke CDP UI OK.
+- Git initialisé, `.gitignore` adapté, commit `chore: initialize Digital Life project` (`73cfcb5`) poussé sur `origin/main`, SSH GitHub vérifié.
+- Modèle personnage initial partagé : `src/shared/character.ts` (identité, 21 traits, 10 émotions, 8 besoins, objectifs).
+- PRNG seedé déterministe : `src/main/services/prng.ts` (mulberry32, aucun `Math.random()` dans le générateur).
+- Générateur : `src/main/services/character-generator.service.ts` (déterministe, seed + paramètres => mêmes personnages).
+- Persistance SQLite : table `characters` dans `data/saves/worlds.sqlite`, migration additive, index `world_id`, suppression en cascade explicite à la suppression du monde.
+- `createWorld` génère et persiste les personnages quand `generationMode=random`; monde vide => aucun personnage.
+- IPC/preload/shared : canal `character:list`, `window.digitalLife.listCharacters(worldId)`, validation entrée Main.
+- Tests : `tests/character-generation.test.ts` (8 tests) couvrant seed identique/différente, nombre exact, monde vide, persistance, isolation, pas de doublons, rechargement après redémarrage.
 
 ## Ce qui reste à faire
 
-1. Générer effectivement les personnages aléatoires lors de la création (données personnage minimales, persistance par monde/fichier ou table dédiée, sans simulation).
-2. Implémenter la reprise/chargement réel d'un monde sauvegardé (écran état monde).
-3. Ajouter slots/sauvegardes multiples déjà couvertes par mondes, mais améliorer métadonnées/UX si nécessaire.
+1. Implémenter la reprise/chargement réel d'un monde sauvegardé (écran/état dédié lecture seule, métadonnées + personnages, sans moteur).
+2. Permettre l'ajout manuel de personnages dans un monde vide (Phase 1/2).
+3. Démarrer Phase 2+ seulement après validation des fondations.
 
 ## Décisions techniques
 
-- TypeScript 5.9.3 plutôt que 7.0.2 : maturité et compatibilité des outils.
-- Commun JS (CommonJS) pour main/preload compilés par tsc ; ESM pour le renderer via Vite.
-- sql.js WASM copié dans `resources/sqlite/` et chargé depuis le disque local uniquement.
-- Les scripts `.mjs` se relancent avec le Node local même si l'utilisateur tape `npm run ...`.
+- TypeScript 5.9.3 ; main/preload CommonJS compilés tsc, preload bundlé Rolldown, renderer ESM/Vite.
+- sql.js WASM local ; DB SQLite `data/saves/worlds.sqlite` avec tables `worlds` et `characters`.
+- Génération personnages déterministe : PRNG mulberry32 seedé, aucun `Math.random()` dans le générateur ; même seed+paramètres => mêmes personnages.
+- Traits/émotions/besoins/objectifs persistés en JSON dans SQLite pour extensibilité Phase 1 ; identité en colonnes dédiées.
 
 ## Problèmes rencontrés
 
@@ -35,8 +37,9 @@ Node portable local v26.13.1, dépendances npm, WASM sql.js, Electron 45.4.1 lin
 
 ## Fichiers importants à examiner
 
-`AGENTS.md`, `PROGRESS.md`, `scripts/bootstrap.sh`, `scripts/runtime.mjs`,
-`src/main/main.ts`, `src/preload/preload.ts`, `src/shared/ipc.ts`, `src/renderer/App.tsx`.
+`AGENTS.md`, `PROGRESS.md`, `HANDOFF.md`, `src/main/services/world-store.service.ts`,
+`src/main/services/character-generator.service.ts`, `src/shared/character.ts`,
+`src/shared/ipc.ts`, `src/main/ipc/world.ipc.ts`, `src/preload/preload.ts`, `tests/character-generation.test.ts`.
 
 ## Commande de relance
 
@@ -45,4 +48,4 @@ Windows : `.\\scripts\\bootstrap.ps1` puis `.\\scripts\\dev.ps1`
 
 ## Prochaine tâche recommandée
 
-Implémenter la **génération effective des personnages aléatoires** pour les mondes `generationMode=random` (modèle personnage minimal, seedée, persistée), puis brancher la reprise à un écran de détail monde lecture seule. Ne pas démarrer le moteur de simulation.
+Implémenter la **reprise/chargement réel d'un monde sauvegardé** : écran/état dédié lecture seule affichant métadonnées du monde et liste des personnages (via `listCharacters`), sans moteur de simulation. Ensuite permettre l'ajout manuel de personnages dans un monde vide.

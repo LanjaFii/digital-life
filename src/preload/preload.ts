@@ -11,6 +11,7 @@ const api: DigitalLifeApi = {
   listWorlds: () => ipcRenderer.invoke(IPC_CHANNELS.WORLD_LIST),
   createWorld: (input) => ipcRenderer.invoke(IPC_CHANNELS.WORLD_CREATE, input),
   deleteWorld: (id) => ipcRenderer.invoke(IPC_CHANNELS.WORLD_DELETE, id),
+  listCharacters: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_LIST, worldId),
 };
 
 contextBridge.exposeInMainWorld('digitalLife', api);

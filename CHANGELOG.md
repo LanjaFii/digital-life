@@ -2,6 +2,25 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-23 — Phase 1 (génération personnages)
+
+### Added
+- Modèle personnage initial : `src/shared/character.ts` (identité, 21 traits, 10 émotions, 8 besoins, objectifs).
+- PRNG seedé déterministe `src/main/services/prng.ts` (mulberry32), sans `Math.random()` dans le générateur.
+- `src/main/services/character-generator.service.ts` : génération déterministe par seed/paramètres.
+- Persistance SQLite : table `characters` (`world_id`, identité, JSON traits/émotions/besoins/objectifs), index, migration additive.
+- API IPC/preload : `character:list` + `window.digitalLife.listCharacters(worldId)`, validation Main.
+- Tests `tests/character-generation.test.ts` : seed identique/différente, nombre exact, monde vide, persistance SQLite, isolation, pas de doublons, rechargement après redémarrage.
+
+### Changed
+- `createWorld` génère et persiste les personnages pour `generationMode=random`; monde vide crée 0 personnage.
+- `deleteWorld` supprime aussi les personnages du monde.
+- Documentation `docs/CHARACTER_SYSTEM.md` mise à jour avec modèle/échelles implémentés.
+
+### Technical decisions
+- Personnages stockés dans `worlds.sqlite` (table `characters`) pour simplicité Phase 1 ; isolation par `world_id`.
+- Champs complexes (traits/émotions/besoins/objectifs) en JSON pour extensibilité, identité en colonnes.
+
 ## 2026-11-23 — Phase 1 (menu principal)
 
 ### Added

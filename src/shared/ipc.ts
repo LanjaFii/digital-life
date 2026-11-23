@@ -1,3 +1,4 @@
+import type { CharacterListResult } from './character';
 import type { CreateWorldInput, WorldListResult, WorldSummary } from './world';
 
 /**
@@ -10,6 +11,7 @@ export const IPC_CHANNELS = {
   WORLD_LIST: 'world:list',
   WORLD_CREATE: 'world:create',
   WORLD_DELETE: 'world:delete',
+  CHARACTER_LIST: 'character:list',
 } as const;
 
 export interface AppInfo {
@@ -38,4 +40,5 @@ export interface DigitalLifeApi {
   listWorlds(): Promise<WorldListResult>;
   createWorld(input: CreateWorldInput): Promise<WorldSummary>;
   deleteWorld(id: string): Promise<{ deleted: boolean }>;
+  listCharacters(worldId: string): Promise<CharacterListResult>;
 }
