@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerAppIpc } from './ipc/app.ipc';
+import { registerCharacterIpc } from './ipc/character.ipc';
 import { registerWorldIpc } from './ipc/world.ipc';
 import { isAllowedUrl, WINDOW_SECURITY } from './security/window';
 
@@ -38,6 +39,7 @@ function createWindow(): void {
 app.setName('DIGITAL LIFE');
 registerAppIpc();
 registerWorldIpc();
+registerCharacterIpc();
 
 void app.whenReady().then(() => {
   createWindow();

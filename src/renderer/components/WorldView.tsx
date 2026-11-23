@@ -1,50 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Calendar, Dna, Hash, Users, AlertTriangle, RefreshCw } from 'lucide-react';
-import type { Character } from '../../shared/character';
+import { ArrowLeft, Calendar, Dna, Hash, Users, AlertTriangle, RefreshCw, Plus, Library, Pencil } from 'lucide-react';
+import type { Character, CharacterDraft } from '../../shared/character';
 import type { WorldSummary } from '../../shared/world';
 import { CharacterDetail } from './CharacterDetail';
+import { CharacterForm } from './CharacterForm';
+import { AddFromLibraryDialog } from './AddFromLibraryDialog';
+import { EMOTION_LABELS, TRAIT_LABELS, draftFromCharacter } from './character-labels';
 
 interface Props {
   worldId: string;
   onBackToMenu: () => void;
 }
-
-const EMOTION_LABELS: Record<string, string> = {
-  happiness: 'Bonheur',
-  sadness: 'Tristesse',
-  stress: 'Stress',
-  anxiety: 'Anxiété',
-  anger: 'Colère',
-  fear: 'Peur',
-  confidence: 'Confiance',
-  loneliness: 'Solitude',
-  motivation: 'Motivation',
-  satisfaction: 'Satisfaction',
-};
-
-const TRAIT_LABELS: Record<string, string> = {
-  sociability: 'Sociabilité',
-  empathy: 'Empathie',
-  aggression: 'Agressivité',
-  patience: 'Patience',
-  impulsivity: 'Impulsivité',
-  curiosity: 'Curiosité',
-  intelligence: 'Intelligence',
-  creativity: 'Créativité',
-  honesty: 'Honnêteté',
-  altruism: 'Altruisme',
-  ambition: 'Ambition',
-  courage: 'Courage',
-  timidity: 'Timidité',
-  distrust: 'Méfiance',
-  optimism: 'Optimisme',
-  humor: 'Humour',
-  jealousy: 'Jalousie',
-  discipline: 'Discipline',
-  independence: 'Indépendance',
-  loyalty: 'Loyauté',
-  resilience: 'Résilience',
-};
 
 function formatDate(value: string): string {
   try {
@@ -61,14 +27,14 @@ function genderLabel(gender: Character['gender']): string {
 }
 
 function dominantEmotion(character: Character): { key: string; label: string; value: number } {
-  const entries = Object.entries(character.emotions);
+  const entries = Object.entries(character.currentState.emotions);
   entries.sort((a, b) => b[1] - a[1]);
   const [key, value] = entries[0] ?? ['happiness', 0];
   return { key, label: EMOTION_LABELS[key] ?? key, value };
 }
 
 function representativeTraits(character: Character): Array<{ key: string; label: string; value: number }> {
-  return Object.entries(character.traits)
+  return Object.entries(character.currentState.traits)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
     .map(([key, value]) => ({ key, label: TRAIT_LABELS[key] ?? key, value }));
@@ -80,6 +46,9 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showLibraryPicker, setShowLibraryPicker] = useState(false);
+  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -106,6 +75,19 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
   }, [load]);
 
   const selectedCharacter = selectedCharacterId ? characters.find((c) => c.id === selectedCharacterId) ?? null : null;
+
+  const handleCreate = async (draft: CharacterDraft, saveAsTemplate: boolean) => {
+    await window.digitalLife.createCharacter({ worldId, ...draft, saveAsTemplate });
+    setShowCreate(false);
+    await load();
+  };
+
+  const handleUpdate = async (draft: CharacterDraft) => {
+    if (!editingCharacter) return;
+    await window.digitalLife.updateCharacter(editingCharacter.id, worldId, { id: editingCharacter.id, worldId, ...draft });
+    setEditingCharacter(null);
+    await load();
+  };
 
   if (loading) {
     return (
@@ -142,8 +124,12 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
       <div className="world-view">
         <div className="topbar">
           <button type="button" className="button ghost" onClick={onBackToMenu}><ArrowLeft size={16} /> Menu principal</button>
+          <button type="button" className="button ghost" onClick={() => setEditingCharacter(selectedCharacter)}><Pencil size={15} /> Modifier ce personnage</button>
         </div>
         <CharacterDetail character={selectedCharacter} onBack={() => setSelectedCharacterId(null)} />
+        {editingCharacter ? (
+          <CharacterForm mode="edit" context="world" title={`Modifier ${editingCharacter.firstName} ${editingCharacter.lastName}`} initialDraft={draftFromCharacter(editingCharacter)} submitLabel="Enregistrer les modifications" onCancel={() => setEditingCharacter(null)} onSubmit={(draft) => handleUpdate(draft)} />
+        ) : null}
       </div>
     );
   }
@@ -152,14 +138,18 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
     <div className="world-view">
       <div className="topbar">
         <button type="button" className="button ghost" onClick={onBackToMenu}><ArrowLeft size={16} /> Menu principal</button>
-        <button type="button" className="button ghost" onClick={() => void load()}><RefreshCw size={15} /> Actualiser</button>
+        <div className="inline-actions">
+          <button type="button" className="button ghost" onClick={() => void load()}><RefreshCw size={15} /> Actualiser</button>
+          <button type="button" className="button ghost" onClick={() => setShowLibraryPicker(true)}><Library size={15} /> Ajouter depuis ma bibliothèque</button>
+          <button type="button" className="button primary" onClick={() => setShowCreate(true)}><Plus size={15} /> Créer un personnage</button>
+        </div>
       </div>
 
       <section className="panel world-hero">
         <div>
           <p className="eyebrow">Monde sauvegardé</p>
           <h2 className="world-title">{world.name}</h2>
-          <p className="subtitle">Consultation en lecture seule. Le moteur de simulation n'est pas encore actif.</p>
+          <p className="subtitle">Monde en préparation : personnages modifiables. Le moteur de simulation n'est pas encore actif.</p>
         </div>
         <div className="world-info-grid">
           <div className="info-tile"><span className="info-icon"><Calendar size={15} /></span><div><p className="info-label">Création</p><p className="info-value">{formatDate(world.createdAt)}</p></div></div>
@@ -182,7 +172,7 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
           <div className="empty-state">
             <Users size={40} strokeWidth={1.2} />
             <h3>Aucun personnage</h3>
-            <p>Ce monde est vide pour l'instant. L'ajout manuel de personnages sera disponible dans une tranche ultérieure.</p>
+            <p>Ce monde est vide pour l'instant. Crée un personnage ou ajoute un modèle depuis ta bibliothèque.</p>
           </div>
         ) : (
           <div className="character-grid">
@@ -215,6 +205,14 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
           </div>
         )}
       </section>
+
+      {showCreate ? (
+        <CharacterForm mode="create" context="world" title="Créer un personnage" submitLabel="Ajouter au monde" onCancel={() => setShowCreate(false)} onSubmit={(draft, saveAsTemplate) => handleCreate(draft, saveAsTemplate)} />
+      ) : null}
+
+      {showLibraryPicker ? (
+        <AddFromLibraryDialog worldId={worldId} onClose={() => setShowLibraryPicker(false)} onAdded={() => load()} />
+      ) : null}
     </div>
   );
 }

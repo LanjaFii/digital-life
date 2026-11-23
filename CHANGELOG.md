@@ -2,6 +2,58 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-23 — Phase 1 (création manuelle de personnages + bibliothèque réutilisable)
+
+### Added
+- **Bibliothèque personnelle** : table `character_templates`, service CRUD complet
+  (`createTemplate`, `listTemplates`, `getTemplate`, `updateTemplate`, `deleteTemplate`,
+  `instantiateTemplate`), IPC/preload dédiés (`template:*`), écran `LibraryView`
+  (cartes, recherche par nom, états chargement/vide/erreur/aucun résultat, dates).
+- **Création manuelle** : formulaire `CharacterForm` en 6 étapes (identité, 21 traits avec
+  libellés/descriptions FR et sliders, 10 émotions, 8 besoins, 1+2 objectifs, récapitulatif),
+  option « monde seul » ou « monde + bibliothèque », bouton « Générer une personnalité
+  cohérente » réutilisant le générateur déterministe (`generateDraftState`, IPC `character:random-draft`).
+- **Ajout depuis la bibliothèque** dans l'écran monde : `AddFromLibraryDialog`
+  (sélection → aperçu → confirmation → copie indépendante → actualisation immédiate).
+- **Action « Utiliser »** depuis la bibliothèque : `UseInWorldDialog` (choix du monde puis instanciation).
+- **Modification d'instance** en phase de préparation depuis la fiche personnage ;
+  modification de modèle depuis la bibliothèque ; suppressions avec confirmation.
+- Validation centralisée côté main : `character-validation.service.ts` (identifiants, chaînes,
+  âge 18-65, genre, entiers 0-100, 21/10/8 clés exactes, objectifs 1 principal + 2 secondaires,
+  existence monde/modèle).
+- Types partagés : `CharacterTemplate`, `CharacterInstance` (alias `Character`), `CharacterState`
+  (initial/courant), `CharacterDraft`, clés `TRAIT_KEYS`/`EMOTION_KEYS`/`NEED_KEYS`.
+- `worlds.status` (`preparation` | `simulation_started`) + garde `assertWorldPreparation`
+  (verrouillage futur, aucun faux démarrage de simulation).
+- Tests : `tests/character-library.test.ts` (création, rejets de validation, CRUD bibliothèque,
+  réutilisation, indépendance modèle/instances, isolation inter-mondes, verrouillage,
+  **migration additive d'une base legacy**) et `tests/character-library-ui.test.tsx`
+  (navigation bibliothèque, états, création/modification/suppression avec confirmation,
+  ajout depuis la bibliothèque, actualisation immédiate du monde, « Utiliser »).
+
+### Changed
+- Table `characters` étendue additivement : `template_id` (référence informative, sans cascade),
+  `updated_at`, `initial_*_json` / `current_*_json` (backfill depuis les colonnes legacy `*_json`,
+  conservées en miroir). Migration non destructive, anciens mondes/personnages préservés.
+- `CharacterDetail`, `WorldView`, générateur et tests existants adaptés à `currentState`/`initialState`.
+- `WorldView` : boutons « Créer un personnage » / « Ajouter depuis ma bibliothèque » /
+  « Modifier ce personnage » ; libellés FR factorisés dans `character-labels.ts`.
+- `App.tsx` : entrée de navigation « Ma bibliothèque ».
+- `getDb` réinitialise le singleton en cas d'échec d'ouverture (plus de promesse rejetée persistante).
+
+### Fixed
+- **Migration legacy** : l'index `idx_characters_template_id` était créé avant l'ajout de la
+  colonne `template_id` sur les bases existantes (« no such column » détecté au smoke réel) ;
+  index désormais créé après migration. Test de non-régression sur base Phase 1 ajouté.
+
+### Technical decisions
+- **Modèle vs instance** : instancier = copie profonde avec nouvel UUID ; aucune synchronisation
+  automatique modèle ↔ instances ; suppression d'un modèle → `template_id = NULL`, instances intactes.
+- `initialState`/`currentState` séparés dès maintenant pour éviter une refonte au démarrage
+  de la simulation (Phase 3) ; en préparation, les deux sont réalignés à chaque édition.
+- Pas de FK entre `characters.template_id` et `character_templates` (référence purement informative).
+- Aucune simulation, action, interaction, relation, événement, mémoire, mort, LLM dans cette tranche.
+
 ## 2026-11-23 — Phase 1 (reprise/consultation de monde)
 
 ### Added

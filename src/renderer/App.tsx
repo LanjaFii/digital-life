@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Globe2, Plus, RefreshCw, Trash2, Play, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Globe2, Plus, RefreshCw, Trash2, Play, ShieldCheck, AlertTriangle, Library } from 'lucide-react';
 import type { DiagnosticResult } from '../shared/ipc';
 import type { CreateWorldInput, WorldSummary } from '../shared/world';
 import { DiagnosticList } from './components/DiagnosticList';
 import { CreateWorldDialog } from './components/CreateWorldDialog';
 import { WorldView } from './components/WorldView';
+import { LibraryView } from './components/LibraryView';
 
 function formatDate(value: string): string {
   try {
@@ -24,6 +25,7 @@ export default function App() {
   const [showDiag, setShowDiag] = useState(false);
   const [diagnostic, setDiagnostic] = useState<DiagnosticResult | null>(null);
   const [selectedWorldId, setSelectedWorldId] = useState<string | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
 
   const loadWorlds = useCallback(async () => {
     setLoading(true);
@@ -88,6 +90,8 @@ export default function App() {
 
       {selectedWorldId ? (
         <WorldView worldId={selectedWorldId} onBackToMenu={handleBackToMenu} />
+      ) : showLibrary ? (
+        <LibraryView onBackToMenu={() => setShowLibrary(false)} />
       ) : (
         <>
           <header className="hero">
@@ -97,6 +101,9 @@ export default function App() {
               <p className="subtitle">Observe des mondes émerger. N'interviens pas dans les histoires — crée les conditions, puis regarde.</p>
             </div>
             <div className="hero-actions">
+              <button type="button" className="button ghost" onClick={() => setShowLibrary(true)}>
+                <Library size={16} /> Ma bibliothèque
+              </button>
               <button type="button" className="button ghost" onClick={() => { setShowDiag((v) => !v); void loadDiagnostic(); }}>
                 <ShieldCheck size={16} /> Diagnostic
               </button>

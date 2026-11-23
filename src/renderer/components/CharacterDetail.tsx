@@ -62,8 +62,9 @@ function genderLabel(gender: Character['gender']): string {
 }
 
 export function CharacterDetail({ character, onBack }: Props) {
-  const primary = character.goals.find((g) => g.kind === 'primary');
-  const secondary = character.goals.filter((g) => g.kind === 'secondary');
+  const state = character.currentState;
+  const primary = state.goals.find((g) => g.kind === 'primary');
+  const secondary = state.goals.filter((g) => g.kind === 'secondary');
 
   return (
     <div className="character-detail">
@@ -92,7 +93,7 @@ export function CharacterDetail({ character, onBack }: Props) {
             <div><p className="eyebrow"><Brain size={12} /> Personnalité</p><h3>Traits (0-100)</h3></div>
           </div>
           <div className="stat-list">
-            {Object.entries(character.traits).map(([key, value]) => (
+            {Object.entries(state.traits).map(([key, value]) => (
               <StatBar key={key} label={TRAIT_LABELS[key] ?? key} value={value} tone="gold" />
             ))}
           </div>
@@ -103,7 +104,7 @@ export function CharacterDetail({ character, onBack }: Props) {
             <div><p className="eyebrow"><Sparkles size={12} /> Émotions</p><h3>État émotionnel (0-100)</h3></div>
           </div>
           <div className="stat-list">
-            {Object.entries(character.emotions).map(([key, value]) => (
+            {Object.entries(state.emotions).map(([key, value]) => (
               <StatBar key={key} label={EMOTION_LABELS[key] ?? key} value={value} tone="cyan" />
             ))}
           </div>
@@ -114,7 +115,7 @@ export function CharacterDetail({ character, onBack }: Props) {
             <div><p className="eyebrow"><Heart size={12} /> Besoins</p><h3>Besoins (100 = satisfait)</h3></div>
           </div>
           <div className="stat-list">
-            {Object.entries(character.needs).map(([key, value]) => (
+            {Object.entries(state.needs).map(([key, value]) => (
               <StatBar key={key} label={NEED_LABELS[key] ?? key} value={value} tone="violet" />
             ))}
           </div>

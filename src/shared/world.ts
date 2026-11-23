@@ -4,6 +4,7 @@
  */
 
 export type WorldGenerationMode = 'empty' | 'random';
+export type WorldStatus = 'preparation' | 'simulation_started';
 
 export interface WorldSummary {
   id: string;
@@ -11,6 +12,7 @@ export interface WorldSummary {
   seed: number;
   characterCount: number;
   generationMode: WorldGenerationMode;
+  status: WorldStatus;
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string | null;

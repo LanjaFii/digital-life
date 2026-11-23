@@ -42,6 +42,15 @@ describe('Sécurité IPC', () => {
       WORLD_DELETE: 'world:delete',
       WORLD_GET: 'world:get',
       CHARACTER_LIST: 'character:list',
+      CHARACTER_CREATE: 'character:create',
+      CHARACTER_UPDATE: 'character:update',
+      CHARACTER_RANDOM_DRAFT: 'character:random-draft',
+      TEMPLATE_LIST: 'template:list',
+      TEMPLATE_GET: 'template:get',
+      TEMPLATE_CREATE: 'template:create',
+      TEMPLATE_UPDATE: 'template:update',
+      TEMPLATE_DELETE: 'template:delete',
+      TEMPLATE_INSTANTIATE: 'template:instantiate',
     });
   });
 

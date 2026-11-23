@@ -140,6 +140,14 @@ function makeGender(rng: SeededRng): CharacterGender {
   return 'nonbinary';
 }
 
+export function generateDraftState(seed: number): { traits: CharacterTraits; emotions: CharacterEmotions; needs: CharacterNeeds } {
+  const rng = new SeededRng(seed);
+  const traits = makeTraits(rng);
+  const emotions = makeEmotions(rng, traits);
+  const needs = makeNeeds(rng);
+  return { traits, emotions, needs };
+}
+
 export function generateCharactersForWorld(worldId: string, seed: number, count: number, createdAt = new Date().toISOString()): Character[] {
   const rng = new SeededRng(seed ^ 0x9e3779b9);
   const result: Character[] = [];
@@ -162,19 +170,21 @@ export function generateCharactersForWorld(worldId: string, seed: number, count:
     const emotions = makeEmotions(local, traits);
     const needs = makeNeeds(local);
     const goals = makeGoals(local);
+    const initialState = { traits: { ...traits }, emotions: { ...emotions }, needs: { ...needs }, goals: goals.map((g) => ({ ...g })) };
+    const currentState = { traits: { ...traits }, emotions: { ...emotions }, needs: { ...needs }, goals: goals.map((g) => ({ ...g })) };
     result.push({
       id: `char_${seed.toString(36)}_${i}_${local.int(1000, 9999)}`,
       worldId,
+      templateId: null,
       firstName,
       lastName,
       age,
       gender,
       biography: makeBiography(firstName, age, traits, local),
-      traits,
-      emotions,
-      needs,
-      goals,
+      initialState,
+      currentState,
       createdAt,
+      updatedAt: createdAt,
     });
   }
   // consume rng to keep deterministic dependency explicit (not necessary but harmless)

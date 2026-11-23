@@ -1,4 +1,15 @@
-import type { CharacterListResult } from './character';
+import type {
+  CharacterInstance,
+  CharacterListResult,
+  CharacterTemplate,
+  CharacterTemplateListResult,
+  CreateCharacterInWorldInput,
+  CreateTemplateInput,
+  InstantiateTemplateInput,
+  RandomCharacterDraft,
+  UpdateCharacterInstanceInput,
+  UpdateTemplateInput,
+} from './character';
 import type { CreateWorldInput, WorldListResult, WorldSummary } from './world';
 
 /**
@@ -13,6 +24,15 @@ export const IPC_CHANNELS = {
   WORLD_DELETE: 'world:delete',
   WORLD_GET: 'world:get',
   CHARACTER_LIST: 'character:list',
+  CHARACTER_CREATE: 'character:create',
+  CHARACTER_UPDATE: 'character:update',
+  CHARACTER_RANDOM_DRAFT: 'character:random-draft',
+  TEMPLATE_LIST: 'template:list',
+  TEMPLATE_GET: 'template:get',
+  TEMPLATE_CREATE: 'template:create',
+  TEMPLATE_UPDATE: 'template:update',
+  TEMPLATE_DELETE: 'template:delete',
+  TEMPLATE_INSTANTIATE: 'template:instantiate',
 } as const;
 
 export interface AppInfo {
@@ -43,4 +63,13 @@ export interface DigitalLifeApi {
   deleteWorld(id: string): Promise<{ deleted: boolean }>;
   getWorld(id: string): Promise<WorldSummary>;
   listCharacters(worldId: string): Promise<CharacterListResult>;
+  createCharacter(input: CreateCharacterInWorldInput): Promise<{ character: CharacterInstance; template?: CharacterTemplate }>;
+  updateCharacter(id: string, worldId: string, input: UpdateCharacterInstanceInput): Promise<CharacterInstance>;
+  generateRandomDraft(): Promise<RandomCharacterDraft>;
+  listTemplates(): Promise<CharacterTemplateListResult>;
+  getTemplate(id: string): Promise<CharacterTemplate>;
+  createTemplate(input: CreateTemplateInput): Promise<CharacterTemplate>;
+  updateTemplate(input: UpdateTemplateInput): Promise<CharacterTemplate>;
+  deleteTemplate(id: string): Promise<{ deleted: boolean }>;
+  instantiateTemplate(input: InstantiateTemplateInput): Promise<CharacterInstance>;
 }

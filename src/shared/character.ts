@@ -60,9 +60,42 @@ export interface CharacterGoal {
   kind: 'primary' | 'secondary';
 }
 
-export interface Character {
+/** État d'un personnage (initial ou courant). */
+export interface CharacterState {
+  traits: CharacterTraits;
+  emotions: CharacterEmotions;
+  needs: CharacterNeeds;
+  goals: CharacterGoal[];
+}
+
+/** Instance de personnage appartenant à un monde. */
+export interface CharacterInstance {
   id: string;
   worldId: string;
+  templateId: string | null;
+  firstName: string;
+  lastName: string;
+  age: number;
+  gender: CharacterGender;
+  biography: string;
+  /** Paramètres de départ (verrouillés quand la simulation démarre). */
+  initialState: CharacterState;
+  /** État courant (évoluera avec la simulation future). */
+  currentState: CharacterState;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Alias de compatibilité : un Character est une instance de monde. */
+export type Character = CharacterInstance;
+
+export interface CharacterListResult {
+  characters: CharacterInstance[];
+}
+
+/** Modèle réutilisable dans la bibliothèque personnelle. */
+export interface CharacterTemplate {
+  id: string;
   firstName: string;
   lastName: string;
   age: number;
@@ -73,8 +106,70 @@ export interface Character {
   needs: CharacterNeeds;
   goals: CharacterGoal[];
   createdAt: string;
+  updatedAt: string;
 }
 
-export interface CharacterListResult {
-  characters: Character[];
+export interface CharacterTemplateListResult {
+  templates: CharacterTemplate[];
+}
+
+export const TRAIT_KEYS = [
+  'sociability', 'empathy', 'aggression', 'patience', 'impulsivity', 'curiosity',
+  'intelligence', 'creativity', 'honesty', 'altruism', 'ambition', 'courage',
+  'timidity', 'distrust', 'optimism', 'humor', 'jealousy', 'discipline',
+  'independence', 'loyalty', 'resilience',
+] as const;
+
+export const EMOTION_KEYS = [
+  'happiness', 'sadness', 'stress', 'anxiety', 'anger', 'fear',
+  'confidence', 'loneliness', 'motivation', 'satisfaction',
+] as const;
+
+export const NEED_KEYS = [
+  'hunger', 'thirst', 'energy', 'sleep', 'health', 'hygiene', 'socialization', 'safety',
+] as const;
+
+export type TraitKey = (typeof TRAIT_KEYS)[number];
+export type EmotionKey = (typeof EMOTION_KEYS)[number];
+export type NeedKey = (typeof NEED_KEYS)[number];
+
+/** Données communes pour création/modification de personnage. */
+export interface CharacterDraft {
+  firstName: string;
+  lastName: string;
+  age: number;
+  gender: CharacterGender;
+  biography: string;
+  traits: CharacterTraits;
+  emotions: CharacterEmotions;
+  needs: CharacterNeeds;
+  goals: CharacterGoal[];
+}
+
+export interface CreateCharacterInWorldInput extends CharacterDraft {
+  worldId: string;
+  /** Enregistrer aussi comme modèle dans la bibliothèque. */
+  saveAsTemplate?: boolean;
+}
+
+export interface CreateTemplateInput extends CharacterDraft {}
+
+export interface UpdateTemplateInput extends CharacterDraft {
+  id: string;
+}
+
+export interface UpdateCharacterInstanceInput extends CharacterDraft {
+  id: string;
+  worldId: string;
+}
+
+export interface InstantiateTemplateInput {
+  templateId: string;
+  worldId: string;
+}
+
+export interface RandomCharacterDraft {
+  traits: CharacterTraits;
+  emotions: CharacterEmotions;
+  needs: CharacterNeeds;
 }

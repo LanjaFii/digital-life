@@ -113,13 +113,13 @@ describe('Génération de personnages (Phase 1)', () => {
       expect(['female', 'male', 'nonbinary']).toContain(c.gender);
       expect(c.biography.length).toBeGreaterThan(10);
 
-      for (const value of Object.values(c.traits)) expectInRange(value, 0, 100);
-      for (const value of Object.values(c.emotions)) expectInRange(value, 0, 100);
-      for (const value of Object.values(c.needs)) expectInRange(value, 0, 100);
+      for (const value of Object.values(c.currentState.traits)) expectInRange(value, 0, 100);
+      for (const value of Object.values(c.currentState.emotions)) expectInRange(value, 0, 100);
+      for (const value of Object.values(c.currentState.needs)) expectInRange(value, 0, 100);
 
-      expect(c.goals.length).toBeGreaterThanOrEqual(1);
-      expect(c.goals.some((g) => g.kind === 'primary')).toBe(true);
-      for (const g of c.goals) {
+      expect(c.currentState.goals.length).toBeGreaterThanOrEqual(1);
+      expect(c.currentState.goals.some((g) => g.kind === 'primary')).toBe(true);
+      for (const g of c.currentState.goals) {
         expect(g.id).toBeTruthy();
         expect(g.label.length).toBeGreaterThan(0);
       }

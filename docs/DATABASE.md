@@ -1,37 +1,98 @@
-# Base de données — [Planifié, phase 1]
+# Base de données
 
-## Principe
+## État réel (Phase 1)
 
-Un fichier SQLite par monde : `data/saves/world_001.sqlite`, `world_002.sqlite`, …
-Persistance via **sql.js**, WASM embarqué dans `resources/sqlite/`, aucun CDN.
+Un **fichier SQLite unique** : `data/saves/worlds.sqlite` (sql.js, WASM embarqué dans
+`resources/sqlite/`, aucun CDN). En dev : racine du projet ; en app packagée : `userData`.
+Le fichier est réécrit de façon atomique-en-un-bloc (`db.export()` → `writeFileSync`)
+après chaque mutation. Le renderer n'y accède **jamais** directement : tout passe par
+preload → IPC → main → `world-store.service.ts`.
 
-## Tables prévues
+> L'ancien concept « un fichier par monde » (`world_001.sqlite`, …) a été abandonné au
+> profit d'une base unique avec isolation par `world_id`. Les sauvegardes par monde
+> (export/import, backups) restent **[Planifié]**.
 
-`worlds`, `characters`, `character_personalities`, `character_needs`,
-`character_emotions`, `character_goals`, `relationships`, `memories`, `events`,
-`locations`, `resources`, `simulation_settings`, `simulation_snapshots`.
+## Schéma actuel
 
-## Opérations
+### `worlds`
 
-- Sauvegarde automatique périodique (par défaut toutes les 50 cycles).
-- Sauvegarde manuelle.
-- Chargement, renommage, suppression **avec confirmation**.
-- Export (copie du fichier) et import (validation du schéma avant remplacement).
-- Backup de secours dans `data/backups/` avant toute opération destructive.
+| Colonne | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | UUID |
+| `name` | TEXT NOT NULL | non vide, validé main |
+| `seed` | INTEGER NOT NULL | PRNG de génération |
+| `character_count` | INTEGER NOT NULL DEFAULT 0 | resynchronisé après chaque ajout/retrait |
+| `generation_mode` | TEXT NOT NULL DEFAULT 'empty' | `empty` \| `random` |
+| `status` | TEXT NOT NULL DEFAULT 'preparation' | `preparation` \| `simulation_started` (futur) |
+| `created_at` / `updated_at` | TEXT NOT NULL | ISO 8601 |
+| `last_opened_at` | TEXT | nullable |
 
-## Performance
+### `characters` (instances de monde)
 
-Ne pas réécrire toute la base à chaque cycle : transactions groupées, updates
-ciblés, snapshots périodiques. Les données de la simulation restent dans le
-worker ; le renderer ne reçoit qu'un état agrégé throttlé.
+| Colonne | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | UUID (ou id déterministe pour la génération aléatoire) |
+| `world_id` | TEXT NOT NULL | FK → `worlds(id)` **ON DELETE CASCADE** |
+| `template_id` | TEXT | référence **informative** au modèle d'origine, nullable, **aucune FK/cascade** |
+| `first_name` / `last_name` | TEXT NOT NULL | |
+| `age` | INTEGER NOT NULL | 18-65 |
+| `gender` | TEXT NOT NULL | `female` \| `male` \| `nonbinary` |
+| `biography` | TEXT NOT NULL | |
+| `traits_json` / `emotions_json` / `needs_json` / `goals_json` | TEXT NOT NULL | colonnes legacy, miroir de l'état courant |
+| `initial_traits_json` / `initial_emotions_json` / `initial_needs_json` / `initial_goals_json` | TEXT | paramètres de départ (futur : verrouillés) |
+| `current_traits_json` / `current_emotions_json` / `current_needs_json` / `current_goals_json` | TEXT | état courant (futur : évolue avec la simulation) |
+| `created_at` | TEXT NOT NULL | |
+| `updated_at` | TEXT | backfill = `created_at` pour les lignes legacy |
 
-## Migrations
+Index : `idx_characters_world_id (world_id)`, `idx_characters_template_id (template_id)`.
 
-Table `schema_migrations` avec version, date, description. Toute évolution du
-schéma passe par une migration versionnée, appliquée à l'ouverture, jamais par
-une modification directe de la base existante.
+### `character_templates` (bibliothèque)
 
-## Restauration
+| Colonne | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | UUID |
+| `first_name` / `last_name` | TEXT NOT NULL | |
+| `age` | INTEGER NOT NULL | |
+| `gender` | TEXT NOT NULL | |
+| `biography` | TEXT NOT NULL | |
+| `traits_json` / `emotions_json` / `needs_json` / `goals_json` | TEXT NOT NULL | paramètres de départ du modèle |
+| `created_at` / `updated_at` | TEXT NOT NULL | |
 
-Copier le fichier souhaité depuis `data/backups/` vers `data/saves/` puis
-redémarrer l'application. Aucune sauvegarde n'est supprimée sans confirmation.
+Index : `idx_templates_updated_at (updated_at DESC)`.
+
+**Aucune contrainte de clé étrangère entre `characters.template_id` et
+`character_templates`** : la suppression d'un modèle remet simplement
+`characters.template_id = NULL` ; les instances survivent intactes.
+
+## Migrations additives (non destructives)
+
+À chaque ouverture (`ensureSchema`) :
+
+1. `CREATE TABLE IF NOT EXISTS` pour les trois tables (schéma courant).
+2. `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` pour les bases existantes :
+   - `worlds.generation_mode` (tranche précédente), `worlds.status` ;
+   - `characters.template_id`, `updated_at`, `initial_*_json`, `current_*_json`.
+3. Backfill des lignes legacy : `updated_at = created_at`,
+   `initial_* = current_* = *_json` existants.
+4. Index créés **après** migration (l'index sur `template_id` nécessite la colonne).
+
+Les anciens mondes/personnages restent consultables et modifiables ; la génération
+aléatoire déterministe est inchangée. Couvert par `tests/character-library.test.ts`
+(test « Migration additive d'une base Phase 1 existante »).
+
+## Opérations (service `world-store.service.ts`)
+
+- Mondes : `createWorld`, `listWorlds`, `getWorld`, `deleteWorld` (cascade personnages).
+- Instances : `listCharacters`, `createCharacterInWorld` (+ modèle optionnel),
+  `updateCharacterInstance`, `instantiateTemplate` (copie profonde, nouvel UUID).
+- Modèles : `createTemplate`, `listTemplates`, `getTemplate`, `updateTemplate`, `deleteTemplate`.
+- Garde `assertWorldPreparation` : refuse création/instanciation/modification si
+  `status = 'simulation_started'`.
+- `syncWorldCharacterCount` maintient `worlds.character_count` exact.
+
+## [Planifié]
+
+- Table `schema_migrations` versionnée (quand le schéma se complexifiera).
+- Sauvegarde automatique périodique, snapshots, backups `data/backups/`,
+  export/import par monde, écritures incrémentales pendant la simulation (worker).
+- Tables simulation : `relationships`, `memories`, `events`, `locations`, etc.

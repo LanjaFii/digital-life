@@ -5,22 +5,36 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 en cours (menu principal + génération/persistance personnages SQLite).
+> **Statut** : Phase 0 validée, Phase 1 en cours (mondes, personnages, création manuelle et bibliothèque réutilisable).
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
-> tests (20/20), build et smoke test IPC/UI validés. Le code réel et `PROGRESS.md` fait foi.
+> tests (70/70), build et smoke tests réels Electron validés. Le code réel et `PROGRESS.md` fait foi.
 
 ## Fonctionnalités
 
-### Réellement disponibles (Phase 0)
-- Application Electron démarrable avec Node.js portable local.
+### Réellement disponibles
+- Application Electron démarrable avec Node.js portable local (Phase 0).
 - IPC strict via preload (`contextIsolation`, `sandbox`, `nodeIntegration: false`).
-- Interface affichant la version, l'environnement et un diagnostic de sécurité réel.
+- Diagnostic de sécurité réel (version, environnement, WASM).
 - Scripts portables Linux/Windows : bootstrap, dev, build, test.
+- Menu principal : création de mondes (vide ou génération aléatoire déterministe seedée),
+  liste des sauvegardes, reprise et suppression de monde (Phase 1).
+- Personnages complets persistés en SQLite : identité, biographie, 21 traits,
+  10 émotions, 8 besoins, 1 objectif principal + 2 secondaires (Phase 1).
+- Reprise/consultation d'un monde : écran monde, cartes personnages, fiche détaillée (Phase 1).
+- **Création manuelle de personnages** : formulaire en 6 étapes depuis un monde,
+  sliders FR, génération aléatoire cohérente optionnelle, option « monde seul » ou
+  « monde + bibliothèque » (Phase 1).
+- **Bibliothèque personnelle « Ma bibliothèque »** : modèles réutilisables persistants,
+  recherche, détail, modification, suppression avec confirmation, action « Utiliser »
+  dans un monde (Phase 1).
+- **Ajout depuis la bibliothèque** dans un monde : sélection → aperçu → confirmation →
+  copie indépendante ; modification d'un personnage tant que le monde est en préparation.
+  Les modèles et les instances sont totalement indépendants (aucune synchronisation).
 
-### Planifiées (phases 1 à 8)
-Menu principal, création de mondes, sauvegardes SQLite, personnages complets,
-moteur multi-agents dans un worker, relations et mémoire, mort et deuil,
-dialogues OpenRouter facultatifs, tableaux de bord et statistiques, packaging.
+### Planifiées (phases 2 à 8)
+Évolution dynamique des personnages, moteur multi-agents dans un worker,
+relations et mémoire, mort et deuil, dialogues OpenRouter facultatifs,
+tableaux de bord et statistiques, packaging.
 
 ## Installation portable
 
@@ -82,11 +96,12 @@ dans le renderer, SQLite ou les logs. Modèle initial :
 `https://openrouter.ai/api/v1/chat/completions`. Tout est configurable.
 Voir `docs/LLM_CONFIGURATION.md`.
 
-## Sauvegardes (phase 1+)
+## Sauvegardes
 
-Emplacement prévu : `data/saves/world_001.sqlite`, etc. Backups dans
-`data/backups/`. Export/import et suppression avec confirmation.
-Voir `docs/DATABASE.md`.
+Base SQLite unique : `data/saves/worlds.sqlite` (mondes, personnages, modèles de
+bibliothèque), écrite par le processus principal uniquement. Migration additive
+automatique des bases existantes. Backups dans `data/backups/`, export/import et
+sauvegarde périodique : **[Planifié]**. Voir `docs/DATABASE.md`.
 
 ## Documentation
 

@@ -13,6 +13,7 @@ function makeWorld(overrides: Partial<WorldSummary> = {}): WorldSummary {
     seed: 123,
     characterCount: 2,
     generationMode: 'random',
+    status: 'preparation',
     createdAt: '2026-01-01T10:00:00.000Z',
     updatedAt: '2026-01-01T10:00:00.000Z',
     lastOpenedAt: null,
@@ -21,14 +22,7 @@ function makeWorld(overrides: Partial<WorldSummary> = {}): WorldSummary {
 }
 
 function makeCharacter(overrides: Partial<Character> = {}): Character {
-  return {
-    id: 'char-1',
-    worldId: 'world-1',
-    firstName: 'Alice',
-    lastName: 'Martin',
-    age: 28,
-    gender: 'female',
-    biography: 'Alice observe le monde avec calme.',
+  const state = {
     traits: {
       sociability: 70, empathy: 65, aggression: 20, patience: 60, impulsivity: 30, curiosity: 75,
       intelligence: 72, creativity: 68, honesty: 80, altruism: 66, ambition: 55, courage: 58,
@@ -41,11 +35,24 @@ function makeCharacter(overrides: Partial<Character> = {}): Character {
     },
     needs: { hunger: 80, thirst: 82, energy: 75, sleep: 78, health: 90, hygiene: 85, socialization: 70, safety: 88 },
     goals: [
-      { id: 'g1', label: 'Trouver un équilibre stable au quotidien', kind: 'primary' },
-      { id: 'g2', label: 'Explorer les environs', kind: 'secondary' },
-      { id: 'g3', label: 'Gérer mieux son stress', kind: 'secondary' },
+      { id: 'g1', label: 'Trouver un équilibre stable au quotidien', kind: 'primary' as const },
+      { id: 'g2', label: 'Explorer les environs', kind: 'secondary' as const },
+      { id: 'g3', label: 'Gérer mieux son stress', kind: 'secondary' as const },
     ],
+  };
+  return {
+    id: 'char-1',
+    worldId: 'world-1',
+    templateId: null,
+    firstName: 'Alice',
+    lastName: 'Martin',
+    age: 28,
+    gender: 'female',
+    biography: 'Alice observe le monde avec calme.',
+    initialState: state,
+    currentState: state,
     createdAt: '2026-01-01T10:00:00.000Z',
+    updatedAt: '2026-01-01T10:00:00.000Z',
     ...overrides,
   };
 }
@@ -59,6 +66,15 @@ function installApi(overrides: Partial<DigitalLifeApi> = {}): DigitalLifeApi {
     deleteWorld: vi.fn().mockResolvedValue({ deleted: true }),
     getWorld: vi.fn().mockResolvedValue(makeWorld()),
     listCharacters: vi.fn().mockResolvedValue({ characters: [makeCharacter(), makeCharacter({ id: 'char-2', firstName: 'Bob', lastName: 'Durand', gender: 'male', age: 34 })] }),
+    createCharacter: vi.fn(),
+    updateCharacter: vi.fn(),
+    generateRandomDraft: vi.fn(),
+    listTemplates: vi.fn().mockResolvedValue({ templates: [] }),
+    getTemplate: vi.fn(),
+    createTemplate: vi.fn(),
+    updateTemplate: vi.fn(),
+    deleteTemplate: vi.fn().mockResolvedValue({ deleted: true }),
+    instantiateTemplate: vi.fn(),
     ...overrides,
   };
   Object.defineProperty(window, 'digitalLife', { value: api, configurable: true, writable: true });
@@ -82,7 +98,7 @@ describe('Reprise de monde (UI)', () => {
     await screen.findByRole('heading', { name: 'Personnages' });
     expect(screen.getByText('Alice Martin')).toBeTruthy();
     expect(screen.getByText('Bob Durand')).toBeTruthy();
-    expect(screen.getByText(/Consultation en lecture seule/i)).toBeTruthy();
+    expect(screen.getByText(/Monde en préparation/i)).toBeTruthy();
   });
 
   it('affiche un monde vide sans personnages', async () => {
