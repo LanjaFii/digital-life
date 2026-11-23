@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT, electronPath, ensureLocalNode, fail } from './runtime.mjs';
 
@@ -34,11 +34,56 @@ const viteChild = spawn(process.execPath, [viteBin], {
 });
 
 let started = false;
+function linuxSandboxArgs() {
+  if (process.platform !== 'linux') return [];
+  const forced = process.env.DL_DEV_NO_SANDBOX;
+  if (forced === '0') return [];
+  if (forced === '1') {
+    console.warn('[DIGITAL LIFE] AVERTISSEMENT: DL_DEV_NO_SANDBOX=1 => lancement dev avec --no-sandbox (sandbox Chromium désactivée pour ce processus).');
+    return ['--no-sandbox'];
+  }
+
+  const sandboxBin = join(ROOT, 'node_modules', 'electron', 'dist', 'chrome-sandbox');
+  try {
+    const st = statSync(sandboxBin);
+    const isSetuidRoot = st.uid === 0 && (st.mode & 0o4000) === 0o4000;
+    if (isSetuidRoot) return [];
+  } catch {
+    // Si on ne peut pas statuer le binaire, on ne force rien : Electron décidera.
+  }
+
+  let apparmorRestricted = false;
+  try {
+    apparmorRestricted = readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', 'utf8').trim() === '1';
+  } catch {
+    apparmorRestricted = false;
+  }
+
+  let unprivilegedUserns = true;
+  try {
+    unprivilegedUserns = readFileSync('/proc/sys/kernel/unprivileged_userns_clone', 'utf8').trim() !== '0';
+  } catch {
+    unprivilegedUserns = true;
+  }
+
+  // Sur Ubuntu 23.10+ avec AppArmor restreignant les userns non privilégiés,
+  // le sandbox Chromium userns peut être inutilisable si chrome-sandbox n'est pas setuid root.
+  if (apparmorRestricted || !unprivilegedUserns) {
+    console.warn('[DIGITAL LIFE] AVERTISSEMENT: Environnement Linux restreint détecté (chrome-sandbox non setuid root et userns non privilégiés restreints/indisponibles).');
+    console.warn('[DIGITAL LIFE] Lancement dev avec --no-sandbox UNIQUEMENT pour ce processus de développement. La sécurité de production n’est pas modifiée.');
+    console.warn('[DIGITAL LIFE] Pour utiliser le sandbox, configurez correctement l’environnement (profil AppArmor/chrome-sandbox setuid root) puis relancez avec DL_DEV_NO_SANDBOX=0.');
+    return ['--no-sandbox'];
+  }
+
+  return [];
+}
+
 function startElectron() {
   if (started || shuttingDown) return;
   started = true;
+  const sandboxArgs = linuxSandboxArgs();
   console.log('[DIGITAL LIFE] Serveur prêt, lancement d’Electron…');
-  electronChild = spawn(electronPath(), [ROOT], {
+  electronChild = spawn(electronPath(), [...sandboxArgs, ROOT], {
     cwd: ROOT,
     stdio: 'inherit',
     env: { ...process.env, NODE_ENV: 'development', VITE_DEV_SERVER_URL: devServerUrl },

@@ -5,7 +5,7 @@
 - **Phase** : Phase 1 — Menu principal et gestion des mondes (en cours).
 - **Avancement approximatif** : 55 % (Phase 1).
 - **Dernière mise à jour** : 2026-11-23.
-- **Git** : dépôt initialisé, remote `git@github.com:LanjaFii/digital-life.git`, branche `main` suivie, commit initial `73cfcb5` poussé et vérifié sur `origin/main`.
+- **Git** : dépôt initialisé, remote `git@github.com:LanjaFii/digital-life.git`, branche `main` suivie, `origin/main` à jour jusqu'au commit `2ef639f` (vérifié). Correctif dev Linux préparé pour commit/push vérifié.
 
 ## Fonctionnalités terminées
 
@@ -56,15 +56,16 @@ Ajouts Phase 1 (menu + personnages) :
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
 - Phase 1 menu : `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/main.ts`, `src/renderer/App.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`.
-- Phase 1 personnages : `src/shared/ipc.ts` (canal `character:list`), `src/shared/world.ts`, `src/main/services/world-store.service.ts` (table `characters`, migration, génération/persistance/liste/suppression), `src/main/ipc/world.ipc.ts`, `src/preload/preload.ts`, `tests/phase0.test.ts`, `docs/CHARACTER_SYSTEM.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
+- Phase 1 personnages : `src/shared/ipc.ts`, `src/shared/world.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/world.ipc.ts`, `src/preload/preload.ts`, `tests/phase0.test.ts`, `docs/CHARACTER_SYSTEM.md`.
+- Correctif dev Linux : `scripts/dev.mjs` (détection sandbox restreint, `--no-sandbox` dev uniquement, avertissement), `vite.config.ts` → `vite.config.mts`, `tsconfig.json`, `docs/TROUBLESHOOTING.md`, `docs/DEVELOPMENT.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
 
 ## Tests réussis
 
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **20/20 tests passés** (`tests/phase0.test.ts`, `tests/world-store.test.ts`, `tests/character-generation.test.ts`).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
-- Smoke test CDP UI menu (2026-11-23, env restreint, flags Electron de diagnostic) : menu rendu, création/suppression/reprendre désactivé vérifiés.
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **20/20 passés** (`tests/phase0.test.ts`, `tests/world-store.test.ts`, `tests/character-generation.test.ts`).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
+- **Lancement réel Electron dev** (`scripts/dev.mjs`, Linux restreint, 2026-11-23) : Vite prêt, détection sandbox restreint, avertissement explicite, Electron lancé avec `--no-sandbox` **dev uniquement** ; processus main/zygote/gpu/network/renderer observés actifs. Aucune modification de `WINDOW_SECURITY`.
 
 ## Tests échoués
 
@@ -72,15 +73,14 @@ Ajouts Phase 1 (menu + personnages) :
 
 ## Bugs connus
 
-- Aucun bug applicatif confirmé après correctifs Phase 0.
+- Aucun bug applicatif confirmé. Le blocage lancement Electron dev sur Linux restreint (AppArmor/userns, `chrome-sandbox` non setuid) est corrigé en dev par détection + `--no-sandbox` **processus dev uniquement** avec avertissement (voir Problèmes techniques).
 
 ## Problèmes techniques
 
-- Réseau instable pendant les sessions précédentes : téléchargements Electron interrompus (ECONNRESET/timeouts). Résolu en téléchargeant l'archive officielle vérifiée SHA-256.
-- `npm install` a nécessité `--prefer-online --fetch-retries=5` après un ERESOLVE transitoire.
-- Smoke test dans cet environnement Linux nécessite des flags Electron `--no-sandbox --disable-gpu --disable-gpu-sandbox --in-process-gpu` à cause des restrictions apparmor/userns sur `chrome-sandbox` et du GPU. Les défauts de sécurité du code ne sont pas modifiés.
-- Bug corrigé : preload sandboxé ne peut pas `require` des fichiers locaux relatifs ; le build bundle désormais le preload avec Rolldown.
-- Bug corrigé : `app.getAppPath()` pouvait résoudre `dist/main` selon le mode de lancement ; `dev.mjs` passe la racine projet et `resource.service.ts` a un fallback `process.cwd()`.
+- Réseau instable pendant sessions précédentes : téléchargements Electron interrompus ; résolu via archive officielle vérifiée SHA-256. `npm install` a nécessité `--prefer-online --fetch-retries=5` après ERESOLVE transitoire.
+- **Linux restreint (AppArmor/userns)** : `chrome-sandbox` du zip Electron est 0755 (pas setuid root) et `kernel.apparmor_restrict_unprivileged_userns=1` bloque le sandbox userns non privilégié. `scripts/dev.mjs` détecte ce cas et lance Electron dev avec `--no-sandbox` **uniquement pour ce processus**, avec avertissement explicite. `src/main/security/window.ts` reste inchangé (`contextIsolation:true`, `nodeIntegration:false`, `sandbox:true`, `webSecurity:true`). Correction propre : profil AppArmor dédié ou `chrome-sandbox` root:root 4755 (implications sécurité, action manuelle hors scripts).
+- Bug corrigé : preload sandboxé bundlé Rolldown.
+- Bug corrigé : résolution `app.getAppPath()`/WASM en dev via `ROOT` + fallback `process.cwd()`.
 
 ## Prochaine tâche précise
 

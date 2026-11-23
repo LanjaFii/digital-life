@@ -13,6 +13,8 @@ bash scripts/bootstrap.sh          # Linux/macOS
 bash scripts/dev.sh                # Ctrl+C ou fermeture de la fenêtre pour arrêter
 ```
 
+Sur Linux restreint (AppArmor userns + `chrome-sandbox` non setuid), `scripts/dev.mjs` peut lancer Electron en dev avec `--no-sandbox` **uniquement pour ce processus**, en affichant un avertissement. Ce contournement ne modifie pas les paramètres de sécurité de production. Voir `docs/TROUBLESHOOTING.md`. Variables : `DL_DEV_NO_SANDBOX=0` (désactiver contournement) / `1` (forcer).
+
 ## Reconstruire et tester
 
 ```bash

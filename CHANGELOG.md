@@ -2,6 +2,18 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-23 — Correctif dev Linux (sandbox Electron) + Vite config
+
+### Fixed
+- `scripts/dev.mjs` : détection Linux restreint (AppArmor `unprivileged_userns` restreint / `chrome-sandbox` non setuid root) et lancement Electron dev avec `--no-sandbox` **uniquement pour le processus de développement**, avec avertissement explicite. Aucun changement des paramètres de sécurité de production (`WINDOW_SECURITY` inchangé).
+- Avertissement Vite `configLoader: 'native'` corrigé proprement en renommant `vite.config.ts` → `vite.config.mts` et en mettant à jour `tsconfig.json`.
+
+### Changed
+- `docs/TROUBLESHOOTING.md`, `docs/DEVELOPMENT.md` : documentation du contournement dev sandbox, implications, variables `DL_DEV_NO_SANDBOX`, et options de correction propre.
+
+### Technical decisions
+- Le contournement `--no-sandbox` est isolé à `scripts/dev.mjs` (dev uniquement), jamais dans `src/main/security/window.ts` ni dans le build packagé. Il est activé automatiquement seulement quand l'environnement Linux ne permet pas de sandbox Chromium utilisable ; il peut être désactivé/forcé par variable d'environnement.
+
 ## 2026-11-23 — Phase 1 (génération personnages)
 
 ### Added

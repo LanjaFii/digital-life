@@ -34,17 +34,19 @@ l'extraire dans `node_modules/electron/dist`, puis écrire le nom de l'exécutab
 `node_modules/electron/path.txt` (ex. `electron` sous Linux).
 
 **La fenêtre ne s'ouvre pas sous Linux** → vérifier l'affichage (`DISPLAY` ou
-`WAYLAND_DISPLAY`). Electron nécessite un serveur graphique ; aucun mode
-`--no-sandbox` n'est activé par défaut.
+`WAYLAND_DISPLAY`). Electron nécessite un serveur graphique.
 
 **Écran noir** → vérifier la console du terminal : le dev server Vite doit être
 démarré. Le script `dev.mjs` lance Electron dès que Vite signale sa disponibilité.
 
-**`chrome-sandbox` SUID / crash GPU dans un environnement restreint** → sur certains
-systèmes Linux avec restrictions apparmor/userns, Electron peut échouer au démarrage.
-Pour diagnostiquer uniquement, on peut tester avec des flags temporaires :
-`--no-sandbox --disable-gpu --disable-gpu-sandbox --in-process-gpu`. Ne pas modifier
-les défauts de sécurité du projet ; corriger la configuration système si possible.
+**`FATAL: The SUID sandbox helper binary was found, but is not configured correctly` / `No usable sandbox!`** →
+cause fréquente sur Ubuntu 23.10+ avec `kernel.apparmor_restrict_unprivileged_userns=1` lorsque
+`node_modules/electron/dist/chrome-sandbox` n'est pas setuid root (0755). Le zip Electron officiel ne conserve pas le bit SUID.
+
+- **Dev uniquement** : `scripts/dev.mjs` détecte ce cas Linux restreint et lance Electron avec `--no-sandbox` **uniquement pour ce processus de développement**, avec un avertissement explicite. Cela désactive le sandbox processus Chromium ; ce n'est pas appliqué en production/packagé, et `webPreferences.sandbox` reste `true` dans le code.
+- **Contrôle** : `DL_DEV_NO_SANDBOX=0` désactive le contournement auto (si votre environnement est correctement configuré). `DL_DEV_NO_SANDBOX=1` force le contournement dev (diagnostic uniquement).
+- **Correction propre** : configurer un profil AppArmor adapté pour le binaire Electron ou installer `chrome-sandbox` en `root:root` mode `4755`. Cette dernière option a des implications sécurité (exécutable setuid root) et ne doit être faite qu'en connaissance de cause, manuellement, hors scripts du projet.
+- **Ne pas** modifier `src/main/security/window.ts` ni désactiver la sandbox globalement.
 
 ## Simulation (phases futures)
 
