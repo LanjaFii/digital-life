@@ -40,6 +40,7 @@ describe('Sécurité IPC', () => {
       WORLD_LIST: 'world:list',
       WORLD_CREATE: 'world:create',
       WORLD_DELETE: 'world:delete',
+      WORLD_GET: 'world:get',
       CHARACTER_LIST: 'character:list',
     });
   });

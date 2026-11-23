@@ -217,6 +217,24 @@ export async function createWorld(input: CreateWorldInput): Promise<WorldSummary
   return world;
 }
 
+export async function getWorld(id: string): Promise<WorldSummary> {
+  if (!id || typeof id !== 'string') throw new Error('Identifiant de monde invalide.');
+  const db = await getDb();
+  const stmt = db.prepare('SELECT * FROM worlds WHERE id = ?');
+  stmt.bind([id]);
+  const row = stmt.step() ? stmt.getAsObject() : null;
+  stmt.free();
+  if (!row) throw new Error('Monde introuvable.');
+
+  const now = new Date().toISOString();
+  const update = db.prepare('UPDATE worlds SET last_opened_at = ?, updated_at = ? WHERE id = ?');
+  update.run([now, now, id]);
+  update.free();
+  persist(db);
+
+  return { ...rowToWorld(row), lastOpenedAt: now, updatedAt: now };
+}
+
 export async function listCharacters(worldId: string): Promise<CharacterListResult> {
   if (!worldId || typeof worldId !== 'string') throw new Error('Identifiant de monde invalide.');
   const db = await getDb();

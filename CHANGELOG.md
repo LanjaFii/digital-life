@@ -2,6 +2,27 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-23 — Phase 1 (reprise/consultation de monde)
+
+### Added
+- IPC/preload : canal `world:get` + `window.digitalLife.getWorld(id)` pour charger un monde par identifiant depuis SQLite.
+- Service `world-store` : `getWorld(id)` avec validation, erreur "Monde introuvable", mise à jour `lastOpenedAt/updatedAt`.
+- UI renderer : `WorldView` (métadonnées monde, liste/cartes personnages, états chargement/erreur/introuvable/vide, actualisation), `CharacterDetail` (identité, bio, 21 traits, 10 émotions, 8 besoins, objectif principal + 2 secondaires), `StatBar` réutilisable.
+- Navigation : bouton "Reprendre" fonctionnel, retour liste personnages, retour menu principal.
+- Tests : couverture service `getWorld`/isolation/persistance après redémarrage, UI jsdom pour reprise, monde vide, monde introuvable, erreur IPC, retours navigation.
+
+### Changed
+- `App.tsx` : état `selectedWorldId` et affichage conditionnel `WorldView` / menu.
+- Contrat IPC partagé et preload étendus avec `WORLD_GET`/`getWorld`.
+- Dépendances dev : `@testing-library/react`, `@testing-library/dom`, `jsdom` pour tests UI renderer.
+
+### Fixed
+- Test IPC Phase 0 mis à jour pour inclure `WORLD_GET`.
+
+### Technical decisions
+- Consultation en lecture seule : aucune modification des modèles de simulation; pas de moteur, pas d'actions/relations/événements/mémoire/mort/LLM.
+- Données affichées exclusivement depuis SQLite via IPC sécurisé; le renderer n'accède pas directement à la DB.
+
 ## 2026-11-23 — Correctif dev Linux (sandbox Electron) + Vite config
 
 ### Fixed

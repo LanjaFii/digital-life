@@ -2,21 +2,26 @@
 
 ## Où en est le développement
 
-Phase 0 validée. Phase 1 en cours : menu principal + génération/persistance initiale des personnages.
-Git : `main` suit `origin/main`, `2ef639f` poussé et vérifié. Correctif dev Linux prêt à être commité/poussé après validation.
+Phase 0 validée. Phase 1 en cours : menu principal, génération/persistance des personnages, reprise/consultation de monde.
+Git : `origin/main` vérifié à `0ae3429` avant cette tranche. Les changements de la tranche reprise sont dans le working tree et doivent être committés/poussés/vérifiés avant toute fonctionnalité suivante.
 
 ## Ce qui vient d'être réalisé
 
-- Tranche personnages (commit `2ef639f`) : modèle `src/shared/character.ts`, PRNG `prng.ts`, générateur déterministe, table SQLite `characters`, IPC/preload `character:list`, tests 20/20, docs mises à jour.
-- **Correctif lancement dev Linux** : `scripts/dev.mjs` détecte environnement restreint (AppArmor `apparmor_restrict_unprivileged_userns=1` + `chrome-sandbox` non setuid root) et lance Electron avec `--no-sandbox` **uniquement pour le processus dev**, avec avertissement explicite. Variables : `DL_DEV_NO_SANDBOX=0|1`. `src/main/security/window.ts` inchangé.
-- **Vite warning corrigé** : `vite.config.ts` renommé en `vite.config.mts` (ESM natif), `tsconfig.json` mis à jour ; plus d'avertissement `configLoader: 'native'`.
-- Validation réelle : check-deps OK, typecheck OK, 20/20 tests OK, build OK, Electron dev lancé réellement (processus main/zygote/gpu/network/renderer actifs).
+- **Tranche reprise/consultation de monde (Phase 1)** :
+  - IPC/preload : ajout `WORLD_GET` / `window.digitalLife.getWorld(id)` (renderer → preload → IPC → main → SQLite). Validation d'entrée côté main.
+  - Service : `getWorld(id)` charge le monde depuis SQLite, met à jour `lastOpenedAt/updatedAt`, lève une erreur si introuvable.
+  - UI : bouton "Reprendre" fonctionnel dans `App.tsx`; nouvel écran `WorldView` (métadonnées monde, nombre réel de personnages, cartes personnages, états chargement/erreur/introuvable, actualisation).
+  - Fiche détail : `CharacterDetail` affiche identité, bio, 21 traits, 10 émotions, 8 besoins, objectif principal + 2 secondaires avec barres de progression (`StatBar`). Échelles conformes à `docs/CHARACTER_SYSTEM.md`.
+  - Navigation : retour liste personnages, retour menu principal; suppression d'un monde consulté gérée (retour menu si monde sélectionné supprimé).
+  - Tests : `tests/world-store.test.ts` étendu (getWorld, introuvable, isolation inter-mondes, persistance après redémarrage); `tests/world-resume-ui.test.tsx` (jsdom) couvre reprise, monde vide, monde introuvable, erreur IPC, retour liste, retour menu.
+  - Dépendances dev ajoutées pour tests UI : `@testing-library/react`, `@testing-library/dom`, `jsdom`.
+- Validation réelle : check-deps OK, typecheck OK, 30/30 tests OK, build OK. Smoke Electron CDP réel (Linux restreint, `--no-sandbox --disable-gpu` dev-only, sécurité `window.ts` inchangée) : Reprendre → monde/2 cartes → fiche détail → retour liste → retour menu.
 
 ## Ce qui reste à faire
 
-1. Implémenter la reprise/chargement réel d'un monde sauvegardé (écran/état dédié lecture seule, métadonnées + personnages, sans moteur).
-2. Permettre l'ajout manuel de personnages dans un monde vide (Phase 1/2).
-3. Démarrer Phase 2+ seulement après validation des fondations.
+1. Permettre l'ajout manuel de personnages dans un monde vide (Phase 1, sans moteur).
+2. Démarrer Phase 2 (évolution dynamique/personnages complets) seulement après validation des fondations Phase 1.
+3. Ne pas implémenter simulation, interactions, relations, événements, mémoire, mort, LLM/OpenRouter avant les phases prévues.
 
 ## Décisions techniques
 
@@ -33,8 +38,9 @@ Git : `main` suit `origin/main`, `2ef639f` poussé et vérifié. Correctif dev L
 ## Fichiers importants à examiner
 
 `AGENTS.md`, `PROGRESS.md`, `HANDOFF.md`, `src/main/services/world-store.service.ts`,
-`src/main/services/character-generator.service.ts`, `src/shared/character.ts`,
-`src/shared/ipc.ts`, `src/main/ipc/world.ipc.ts`, `src/preload/preload.ts`, `tests/character-generation.test.ts`.
+`src/main/ipc/world.ipc.ts`, `src/shared/ipc.ts`, `src/preload/preload.ts`,
+`src/renderer/App.tsx`, `src/renderer/components/WorldView.tsx`,
+`src/renderer/components/CharacterDetail.tsx`, `tests/world-resume-ui.test.tsx`.
 
 ## Commande de relance
 
@@ -43,4 +49,4 @@ Windows : `.\\scripts\\bootstrap.ps1` puis `.\\scripts\\dev.ps1`
 
 ## Prochaine tâche recommandée
 
-Implémenter la **reprise/chargement réel d'un monde sauvegardé** : écran/état dédié lecture seule affichant métadonnées du monde et liste des personnages (via `listCharacters`), sans moteur de simulation. Ensuite permettre l'ajout manuel de personnages dans un monde vide.
+Implémenter l'**ajout manuel de personnages dans un monde vide** : formulaire UI, validation main/preload, persistance SQLite dans `characters` avec `world_id` existant, rafraîchissement de la consultation monde. Ne pas démarrer le moteur de simulation, les interactions, relations, événements, mémoire, mort ou l'intégration LLM.

@@ -3,9 +3,9 @@
 ## État actuel
 
 - **Phase** : Phase 1 — Menu principal et gestion des mondes (en cours).
-- **Avancement approximatif** : 55 % (Phase 1).
+- **Avancement approximatif** : 65 % (Phase 1).
 - **Dernière mise à jour** : 2026-11-23.
-- **Git** : dépôt initialisé, remote `git@github.com:LanjaFii/digital-life.git`, branche `main` suivie, `origin/main` à jour jusqu'au commit `2ef639f` (vérifié). Correctif dev Linux préparé pour commit/push vérifié.
+- **Git** : dépôt initialisé, remote `git@github.com:LanjaFii/digital-life.git`, branche `main` suivie. `origin/main` vérifié à `0ae3429` avant cette tranche ; commit/push de la tranche reprise à effectuer et vérifier dans cette session.
 
 ## Fonctionnalités terminées
 
@@ -25,17 +25,16 @@
 
 ## Fonctionnalités en cours (Phase 1)
 
-- [x] Fondation persistance mondes : `WorldStore` sql.js (SQLite local `data/saves/worlds.sqlite`), IPC `world:list/create/delete`, preload exposé, tests.
+- [x] Fondation persistance mondes : `WorldStore` sql.js (SQLite local `data/saves/worlds.sqlite`), IPC `world:list/create/delete/get`, preload exposé, tests.
 - [x] Menu principal UI : liste des mondes sauvegardés depuis SQLite, états chargement/erreur/vide, bouton actualiser.
 - [x] Création de monde UI : nom, seed aléatoire ou personnalisée, mode monde vide/personnages aléatoires, nombre de personnages configurable (1-50) en mode aléatoire.
 - [x] Suppression de monde avec confirmation modale.
-- [x] Bouton "Reprendre" visible mais désactivé (non implémenté).
 - [x] Génération effective des personnages aléatoires : modèle personnage initial (identité, 21 traits, 10 émotions, 8 besoins, objectifs), PRNG seedé déterministe, persistance SQLite table `characters` isolée par `world_id`, IPC/preload `listCharacters`.
-- [ ] Reprise/chargement réel d'une simulation sauvegardée (écran/état dédié, sans moteur).
+- [x] Reprise/chargement réel d'un monde sauvegardé : bouton "Reprendre" fonctionnel, chargement SQLite monde + personnages via IPC/preload, écran monde (métadonnées + cartes personnages), fiche personnage détaillée (21 traits, 10 émotions, 8 besoins, objectifs), navigation retour liste/menu, états chargement/erreur/monde introuvable, isolation par monde.
 
 ## Fonctionnalités non commencées
 
-- [ ] Phase 1 (reste) : reprise/chargement réel d'un monde sauvegardé ; ajout manuel de personnages dans un monde vide (ultérieur).
+- [ ] Phase 1 (reste) : ajout manuel de personnages dans un monde vide (ultérieur).
 - [ ] Phase 2 : personnages complets (évolution dynamique, édition avancée).
 - [ ] Phase 3 : moteur de simulation dans un worker.
 - [ ] Phases 4 à 8 : relations/mémoire, mort, LLM, interface avancée, stabilisation.
@@ -52,20 +51,27 @@ Ajouts Phase 1 (menu + personnages) :
 - `src/renderer/components/CreateWorldDialog.tsx`
 - `tests/world-store.test.ts`, `tests/character-generation.test.ts`
 
+Ajouts tranche reprise :
+- `src/renderer/components/WorldView.tsx`
+- `src/renderer/components/CharacterDetail.tsx`
+- `src/renderer/components/StatBar.tsx`
+- `tests/world-resume-ui.test.tsx`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
 - Phase 1 menu : `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/main.ts`, `src/renderer/App.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`.
 - Phase 1 personnages : `src/shared/ipc.ts`, `src/shared/world.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/world.ipc.ts`, `src/preload/preload.ts`, `tests/phase0.test.ts`, `docs/CHARACTER_SYSTEM.md`.
 - Correctif dev Linux : `scripts/dev.mjs` (détection sandbox restreint, `--no-sandbox` dev uniquement, avertissement), `vite.config.ts` → `vite.config.mts`, `tsconfig.json`, `docs/TROUBLESHOOTING.md`, `docs/DEVELOPMENT.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- Tranche reprise : `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/ipc/world.ipc.ts`, `src/main/services/world-store.service.ts`, `src/renderer/App.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/world-store.test.ts`, `package.json`, `package-lock.json`, docs de suivi.
 
 ## Tests réussis
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **20/20 passés** (`tests/phase0.test.ts`, `tests/world-store.test.ts`, `tests/character-generation.test.ts`).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **30/30 passés** (`tests/phase0.test.ts`, `tests/world-store.test.ts`, `tests/character-generation.test.ts`, `tests/world-resume-ui.test.tsx`).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
-- **Lancement réel Electron dev** (`scripts/dev.mjs`, Linux restreint, 2026-11-23) : Vite prêt, détection sandbox restreint, avertissement explicite, Electron lancé avec `--no-sandbox` **dev uniquement** ; processus main/zygote/gpu/network/renderer observés actifs. Aucune modification de `WINDOW_SECURITY`.
+- **Lancement réel Electron dev** (Linux restreint, 2026-11-23) : Vite + Electron lancés avec `--no-sandbox --disable-gpu --remote-debugging-port=9229` (config dev uniquement, `src/main/security/window.ts` inchangé). Smoke CDP : création monde test, menu → Reprendre → écran monde avec 2 cartes personnages, clic carte → fiche personnage (traits/émotions/besoins/objectifs visibles), retour liste personnages, retour menu principal. Monde smoke supprimé.
 
 ## Tests échoués
 
@@ -84,4 +90,4 @@ Ajouts Phase 1 (menu + personnages) :
 
 ## Prochaine tâche précise
 
-Phase 1 suite : implémenter la **reprise/chargement réel d'un monde sauvegardé** (écran/état dédié lecture seule affichant métadonnées monde + personnages générés, sans moteur de simulation). Ensuite préparer l'ajout manuel de personnages dans un monde vide.
+Phase 1 suite : permettre l'**ajout manuel de personnages dans un monde vide** (formulaire création personnage, validation, persistance SQLite, affichage immédiat dans la consultation monde), sans moteur de simulation ni évolution dynamique.
