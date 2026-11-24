@@ -2,6 +2,30 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3B (conception du premier système d'évolution dynamique, documentaire)
+
+### Added
+- `docs/NEEDS_EVOLUTION.md` : définition des 8 besoins (100 = satisfait), dérive par tick, facteurs et traits pertinents, interactions inter-besoins, seuils critiques, conséquences futures (sans mort), conditions de récupération, formule générale et calibration provisoire.
+- `docs/EMOTION_EVOLUTION.md` : définition des 10 émotions, causes de hausse/baisse, besoins influents, traits pertinents, interactions, baselines provisoires, matrice besoin→émotion, anti-boucles, plafonds et récupération.
+- `docs/CHARACTER_TICK_RULES.md` : protocole de tick (snapshot → besoins projetés → émotions → agrégation → clamp/arrondi → application différée → transaction atomique + `persist` unique), déterminisme et gestion du PRNG, format `TickDelta[]`, contrats TypeScript proposés, architecture des 4 services purs futurs, calibration 24/72/168/720/plusieurs milliers de ticks, profils et critères d'échec, 2 diagrammes Mermaid.
+
+### Changed
+- `PROGRESS.md`, `HANDOFF.md` mis à jour pour refléter la conception Phase 3B ; Phase 3A reste la dernière tranche code implémentée/validée/poussée (`e0f6d0b`).
+
+### Fixed
+- Aucun.
+
+### Removed
+- Aucun.
+
+### Technical decisions
+- Tranche **strictement documentaire** : aucun code applicatif, schéma SQLite, migration, worker, IPC, preload, UI, LLM, mort, relations, événements ou souvenirs modifié ; aucune implémentation de l'évolution des personnages.
+- Protocole de tick sans biais d'ordre : les émotions utilisent les besoins projetés du tick courant comme entrées de calcul uniquement, sans application prématurée.
+- Aucun PRNG consommé par les règles passives Phase 3B ; `rngState` reste inchangé sauf règle future explicitement justifiée et testée par rejeu.
+- `Date.now()`/`Math.random()` interdits dans les règles métier ; ordre de traitement stable ; reproductibilité après redémarrage.
+- Explicabilité obligatoire des deltas via `TickDelta[]` (entityId, field, before, after, delta, causes[], ruleId).
+- Décisions définitives, hypothèses provisoires et points à calibrer explicitement distingués (coefficients, arrondi `roundHalfEven` vs half-up, précision `number` vs centièmes).
+
 ## 2026-11-24 — Phase 3A (infrastructure fondamentale du moteur de simulation)
 
 ### Added

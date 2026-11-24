@@ -3,8 +3,8 @@
 ## Où en est le développement
 
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
-- **Dernier commit poussé avant cette tranche** : `993936dd1804a7524429800aba23937c980e2d8e` (`docs(phase2): define character evolution architecture contracts`).
-- **Tranche courante** : **Phase 3A — infrastructure fondamentale du moteur de simulation**, implémentée et validée localement (tests/typecheck/build/smoke Electron réel OK). Cette tranche doit être commitée/poussée après mise à jour documentaire.
+- **Dernier commit poussé avant cette tranche** : `e0f6d0b1d032c841e5d5772098f6ab16e3b1f4dd` (`feat(phase3a): implement simulation clock infrastructure`).
+- **Tranche courante** : **Phase 3B — conception documentaire du premier système d'évolution dynamique des personnages**, terminée. Aucune implémentation, aucun code applicatif modifié.
 - **Périmètre réalisé** : PRNG sérialisable, horloge simulation persistée SQLite, worker Node `worker_threads` piloté par le main, commandes IPC/preload/main, UI minimale de contrôle, reprise après redémarrage. **Aucun comportement autonome** (besoins/émotions/décisions/actions/relations/événements/souvenirs/mort/LLM).
 
 ## Ce qui vient d'être réalisé (Phase 3A)
@@ -19,6 +19,22 @@
 - **IPC/preload** : `simulation:status/start/pause/resume/step/speed/stop` + `simulation:status-changed`. Validation des ids/vitesses côté main ; renderer reçoit uniquement des statuts validés.
 - **UI** (`src/renderer/components/WorldView.tsx`) : panneau temps interne, jour/heure/tick, statut, Start/Pause/Resume/Step/Stop, vitesses 1x/2x/5x/10x, état issu du main. Boutons création/modif/suppression personnages désactivés hors préparation.
 - **Tests ajoutés/mis à jour** : `tests/prng.test.ts`, `tests/simulation.test.ts`, mise à jour `tests/phase0.test.ts`, mocks UI simulation dans tests renderer.
+
+## Ce qui vient d'être réalisé (Phase 3B — conception uniquement)
+
+- `docs/NEEDS_EVOLUTION.md` : 8 besoins (100 = satisfait), dérive/tick, traits pertinents, interactions, seuils, récupération, calibration provisoire.
+- `docs/EMOTION_EVOLUTION.md` : 10 émotions, baselines, matrice besoin→émotion, anti-boucles, plafonds, récupération.
+- `docs/CHARACTER_TICK_RULES.md` : protocole snapshot → besoins projetés → émotions → agrégation → clamp/arrondi → application différée → transaction atomique + `persist` unique ; déterminisme/PRNG ; `TickDelta[]` ; contrats TS proposés ; 4 services purs ; calibration 24/72/168/720/plusieurs milliers de ticks ; 2 diagrammes Mermaid.
+- Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI, LLM, mort, relations, événements ou souvenirs touché.
+
+## Décisions de conception Phase 3B
+
+- **Besoins projetés** : les émotions lisent les besoins projetés du tick courant comme entrée de calcul, sans application prématurée ; évite un retard artificiel d'une heure.
+- **Snapshot strict** : tous les calculs partent de l'état de début de tick ; aucun biais d'ordre.
+- **PRNG non consommé** en Phase 3B : règles passives déterministes ; `rngState` reste inchangé sauf règle future explicitement justifiée.
+- **Tick atomique** : états personnages + horloge dans une seule transaction et un seul `persist`.
+- **Services purs** : `personality-influence`, `needs-evolution`, `emotion-evolution`, `character-tick`, testables hors Electron/SQLite/renderer.
+- **Décisions définitives / provisoires / à calibrer** clairement séparées dans `docs/CHARACTER_TICK_RULES.md` §9.
 
 ## Décisions techniques
 
@@ -57,6 +73,7 @@
 - `src/renderer/components/WorldView.tsx` — UI minimale contrôle simulation.
 - `tests/prng.test.ts`, `tests/simulation.test.ts`, `tests/phase0.test.ts`.
 - `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/DATABASE.md`, `docs/ARCHITECTURE.md`.
+- `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md` — conception Phase 3B (source de vérité pour l'implémentation future).
 
 ## Commande de relance
 
@@ -77,5 +94,6 @@ bash scripts/dev.sh
 ## Prochaine tâche recommandée
 
 1. **Finaliser la tranche Git** : vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre.
-2. **Phase 3B (conception puis implémentation prudente)** : définir le contrat du tick métier avant de coder (ordre déterministe, snapshot, transaction par tick, `rngState` avancé pendant tick, pas de `Date.now()` dans règles). Premier scope recommandé : dérive simple besoins/émotions sur tick, sans relations/événements/mémoires/LLM.
-3. **Décision produit à trancher** : politique de reprise d'un monde `simulation_stopped` (nouvelle sauvegarde vs reprise explicite). Ne pas implémenter implicitement.
+2. **Implémenter la Phase 3B (après validation de cette conception)** : services purs + application des deltas dans la même transaction que l'horloge, sans relations/événements/mémoires/décisions/actions/mort/LLM.
+3. **Trancher avant codage** : arrondi `roundHalfEven` vs half-up, précision `number` vs centièmes, calibres définitifs des coefficients (voir `docs/CHARACTER_TICK_RULES.md` §9).
+4. **Décision produit à trancher** : politique de reprise d'un monde `simulation_stopped` (nouvelle sauvegarde vs reprise explicite). Ne pas implémenter implicitement.

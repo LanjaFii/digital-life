@@ -5,7 +5,7 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale).
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B conception documentaire terminée** (évolution besoins/émotions ; aucune implémentation).
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
 > tests (102/102), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
 
@@ -41,11 +41,14 @@ conséquences calculées par le moteur.
 événements, mort et deuil, dialogues OpenRouter facultatifs, tableaux de bord et
 statistiques, packaging.
 
-### Documentation de conception (Phase 2, documentaire uniquement)
+### Documentation de conception (documentaire uniquement)
 - [Architecture de l'état des personnages](docs/CHARACTER_STATE_ARCHITECTURE.md)
 - [Système de relations](docs/RELATIONSHIP_SYSTEM.md)
 - [Événements, historique et souvenirs](docs/EVENT_AND_MEMORY_SYSTEM.md)
 - [Temps interne, ticks et moteur](docs/SIMULATION_TIME_AND_ENGINE.md)
+- [Évolution des besoins (conception Phase 3B)](docs/NEEDS_EVOLUTION.md)
+- [Évolution des émotions (conception Phase 3B)](docs/EMOTION_EVOLUTION.md)
+- [Règles de tick personnage (conception Phase 3B)](docs/CHARACTER_TICK_RULES.md)
 
 ## Installation portable
 

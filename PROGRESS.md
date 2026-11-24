@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3A — Infrastructure fondamentale du moteur de simulation** (implémentée, validée localement, à committer/pousser dans cette tranche).
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure terminée ; comportements autonomes Phase 3B+ non démarrés.
+- **Phase** : **Phase 3B — Conception du premier système d'évolution dynamique des personnages** (documentaire, terminée dans cette tranche ; aucune implémentation).
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B conception documentaire terminée ; comportements autonomes non implémentés.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `993936dd1804a7524429800aba23937c980e2d8e` (`docs(phase2): define character evolution architecture contracts`).
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `e0f6d0b1d032c841e5d5772098f6ab16e3b1f4dd` (`feat(phase3a): implement simulation clock infrastructure`).
 
 ## Fonctionnalités terminées
 
@@ -53,9 +53,18 @@
 - [x] UI WorldView minimale : contrôles start/pause/resume/step/stop, vitesses 1x/2x/5x/10x, affichage jour/heure/tick/statut depuis le main, édition personnages désactivée hors préparation.
 - [x] `simulation_stopped` : arrêt volontaire, données conservées, pas de redémarrage implicite (décision documentée).
 
+## Conception Phase 3B (documentaire, terminée dans cette tranche)
+
+- [x] Audit du réel confirmé : 21 traits, 10 émotions, 8 besoins (`100 = satisfait`), `initialState`/`currentState`, horloge 1 tick = 1 h, PRNG sérialisable, `stepSimulation` ne fait encore évoluer que l'horloge.
+- [x] `docs/NEEDS_EVOLUTION.md` : 8 besoins (définition, dérive/tick, facteurs, traits pertinents, interactions, seuils critiques, conséquences futures, récupération), formule générale, calibration provisoire, limites et tests à prévoir.
+- [x] `docs/EMOTION_EVOLUTION.md` : 10 émotions (causes hausse/baisse, besoins influents, traits pertinents, interactions, récupération), baselines provisoires, matrice besoin→émotion, anti-boucles, plafonds, tests à prévoir.
+- [x] `docs/CHARACTER_TICK_RULES.md` : protocole snapshot → besoins projetés → émotions → agrégation → clamp/arrondi → application différée → transaction atomique + `persist` unique ; déterminisme/PRNG ; `TickDelta[]` explicable ; contrats TS proposés ; 4 services purs futurs ; calibration 24/72/168/720/plusieurs milliers de ticks ; profils et critères d'échec ; 2 diagrammes Mermaid ; décisions définitives / provisoires / à calibrer.
+- [x] Aucun code applicatif, schéma SQLite, migration, worker, IPC, preload, UI, LLM, mort, relations, événements ou souvenirs modifié.
+
 ## Fonctionnalités non commencées
 
-- [ ] Phase 3B+ : évolution dynamique des personnages au tick (besoins, émotions, objectifs, décisions, actions, conséquences).
+- [ ] Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique — **non démarrée**.
+- [ ] Phase 3B+ : décisions autonomes, objectifs, actions, conséquences.
 - [ ] Phases 4 à 8 : relations, événements, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
 ## Conception Phase 2 (documentaire, terminée dans cette tranche)
@@ -113,6 +122,11 @@ Ajouts tranche Phase 3A (infrastructure simulation) :
 - `tests/prng.test.ts`
 - `tests/simulation.test.ts`
 
+Ajouts tranche conception Phase 3B (documentaire uniquement) :
+- `docs/NEEDS_EVOLUTION.md`
+- `docs/EMOTION_EVOLUTION.md`
+- `docs/CHARACTER_TICK_RULES.md`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -124,6 +138,7 @@ Ajouts tranche Phase 3A (infrastructure simulation) :
 - Tranche suppression d'instance : `src/shared/ipc.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/character.ipc.ts`, `src/preload/preload.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/world-resume-ui.test.tsx`, `tests/character-library-ui.test.tsx`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
 - Tranche conception Phase 2 (documentaire) : `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/RELATIONSHIP_SYSTEM.md` (réécrit/étendu), `docs/EVENT_AND_MEMORY_SYSTEM.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 - Tranche Phase 3A (infrastructure simulation) : `src/main/services/prng.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/world.ipc.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/ipc.ts`, `src/shared/world.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/UseInWorldDialog.tsx`, `src/renderer/styles/global.css`, `scripts/test.mjs`, `tests/phase0.test.ts`, `tests/character-library.test.ts`, `tests/character-library-ui.test.tsx`, `tests/character-deletion-ui.test.tsx`, `tests/world-resume-ui.test.tsx`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/DEVELOPMENT.md`, `README.md`, `CHANGELOG.md`, `PROGRESS.md`, `HANDOFF.md`.
+- Tranche conception Phase 3B (documentaire) : `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (liens docs uniquement, si pertinent). Aucun fichier applicatif modifié.
 
 ## Tests réussis
 
@@ -131,6 +146,7 @@ Ajouts tranche Phase 3A (infrastructure simulation) :
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **102/102 passés** (10 fichiers).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
+- **Validation tranche conception Phase 3B (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **102/102 passés** (10 fichiers, aucun code modifié), build OK. Vérification croisée : 21 traits / 10 émotions / 8 besoins présents, 13 traits utilisés et 8 exclus avec justification, 2 diagrammes Mermaid, 5 liens de documentation valides.
 - **Smoke Electron réel Linux** (2026-11-24, `--no-sandbox --disable-gpu`, CDP, 2 lancements avec redémarrage réel) : création monde `SMOKE-SIM` (seed 123, 2 personnages), start tick 0 running, pause, step -> tick 1, vitesse 10x, fermeture, relance restaurée (tick 1, paused, `rngState=2246822416`, world `simulation_paused`), resume, step -> tick 2, suppression monde smoke, `SMOKE_OK`. DB utilisateur sauvegardée/restaurée (`/tmp/dl-worlds-backup.sqlite`) avant commit.
 ## Tests échoués
 
@@ -150,4 +166,4 @@ Ajouts tranche Phase 3A (infrastructure simulation) :
 
 ## Prochaine tâche précise
 
-Phase 1 terminée : CRUD complet des instances (création, lecture, modification, suppression). Prochaine étape : préparer la Phase 2 (évolution dynamique des besoins/émotions : contrat `initialState` → `currentState`) puis la Phase 3 (worker, démarrage réel de simulation, verrouillage UI via `worlds.status`) — **sans** commencer le moteur de simulation ni OpenRouter avant validation des fondations. Voir HANDOFF.md pour la recommandation détaillée.
+La conception Phase 3B est terminée et validée documentairement. Prochaine étape : **implémenter** les règles conçues dans un tick atomique (services purs `personality-influence` / `needs-evolution` / `emotion-evolution` / `character-tick`, application dans la même transaction que l'horloge), après validation explicite de cette tranche documentaire. Ne pas démarrer décisions/actions/relations/événements/souvenirs/mort/LLM. Trancher avant implémentation : arrondi `roundHalfEven` vs half-up, précision `number` vs centièmes, calibres définitifs des coefficients. Voir HANDOFF.md pour la recommandation détaillée.
