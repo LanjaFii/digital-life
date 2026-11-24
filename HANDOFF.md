@@ -2,12 +2,11 @@
 
 ## Où en est le développement
 
-Phase 0 validée. Phase 1 : menu principal, génération/persistance, reprise/consultation,
-création manuelle de personnages, bibliothèque réutilisable,
-**suppression d'une instance de personnage** — tranche terminée,
-testée (88/88), buildée, smoke Electron réel 2 phases avec redémarrage validé,
-committée/poussée sur `origin/main` (hash vérifié par `git ls-remote --heads origin main`,
-working tree propre). Tranche précédente : `1a3d182` (création manuelle + bibliothèque).
+Phase 0 validée. Phase 1 fonctionnelle (CRUD instances complet), dernière tranche code
+validée et poussée : `669c785101aa0a10e6f69506d870b283c77a1510` (suppression d'instance,
+88/88 tests). **Tranche courante : conception architecturale Phase 2 (documentaire uniquement)**.
+Aucun moteur, worker, tick, évolution dynamique, relation/événement/mémoire opérationnel,
+appel OpenRouter/LLM, ni modification de schéma/IPC/UI n'a été implémenté.
 
 ## Ce qui vient d'être réalisé
 
@@ -62,6 +61,20 @@ working tree propre). Tranche précédente : `1a3d182` (création manuelle + bib
     refus IPC cross-world et id vide, persistance après redémarrage, nettoyage + DB restaurée
     byte-identique.
 
+- **Conception Phase 2 (tranche documentaire, 2026-11-24)** :
+  - audit confirmé : `CharacterState` 21/10/8, `initialState`/`currentState`, legacy `*_json`
+    miroir, `SeededRng` sans sérialisation, `src/main/simulation/` vide, aucune relation/événement/mémoire/tick/worker/LLM ;
+  - docs créés/étendus : `docs/CHARACTER_STATE_ARCHITECTURE.md`,
+    `docs/RELATIONSHIP_SYSTEM.md`, `docs/EVENT_AND_MEMORY_SYSTEM.md`,
+    `docs/SIMULATION_TIME_AND_ENGINE.md` (Mermaid, contrats TS/SQLite additifs proposés) ;
+  - décisions proposées : `initialState` immuable après `simulation_started`, worker seul
+    écrivain de `currentState`, transaction par tick, PRNG métier sérialisable (`rngState`),
+    relations asymétriques `ownerId→targetId`, journal d'événements immuable, souvenirs
+    subjectifs `active/faded` jamais supprimés physiquement, temps logique (tick) jamais
+    `Date.now()`, LLM hors décisions/état/événements ;
+  - **aucun code/schéma/IPC/UI modifié** ; paramètres de tick/fréquence/snapshot restent
+    provisoires et explicitement à calibrer.
+
 ## Décisions techniques
 
 - Pas de FK `characters.template_id` → `character_templates` : référence purement
@@ -92,16 +105,15 @@ working tree propre). Tranche précédente : `1a3d182` (création manuelle + bib
 
 ## Fichiers importants à examiner
 
-`AGENTS.md`, `PROGRESS.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`,
-`src/shared/character.ts`, `src/main/services/world-store.service.ts`,
+`AGENTS.md`, `PROGRESS.md`, `HANDOFF.md`,
+`docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/RELATIONSHIP_SYSTEM.md`,
+`docs/EVENT_AND_MEMORY_SYSTEM.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`,
+`docs/SIMULATION_ENGINE.md`, `docs/EVENT_SYSTEM.md`, `docs/MEMORY_SYSTEM.md`,
+`docs/DATABASE.md`, `docs/CHARACTER_SYSTEM.md`,
+`src/shared/character.ts`, `src/shared/world.ts`, `src/shared/ipc.ts`,
+`src/main/services/world-store.service.ts`, `src/main/services/prng.ts`,
 `src/main/services/character-validation.service.ts`, `src/main/ipc/character.ipc.ts`,
-`src/renderer/components/CharacterForm.tsx`, `src/renderer/components/LibraryView.tsx`,
-`src/renderer/components/WorldView.tsx`, `src/renderer/components/ConfirmDeleteCharacterDialog.tsx`,
-`src/renderer/components/CharacterDetail.tsx`, `src/shared/ipc.ts`,
-`src/main/services/world-store.service.ts`, `src/main/ipc/character.ipc.ts`,
-`tests/character-library.test.ts`, `tests/character-library-ui.test.tsx`,
-`tests/character-deletion.test.ts`, `tests/character-deletion-ui.test.tsx`,
-`docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
+`src/preload/preload.ts`.
 
 ## Commande de relance
 
@@ -111,10 +123,12 @@ Tests : `bash scripts/test.sh` — Typecheck : Node local + `scripts/typecheck.m
 
 ## Prochaine tâche recommandée
 
-1. Le CRUD des instances est désormais complet (création, lecture, modification,
-   suppression) : plus d'opération instance manquante en Phase 1.
-2. Préparer la **Phase 2** (évolution dynamique des besoins/émotions) en définissant
-   le contrat `initialState` → `currentState`, puis la Phase 3 (worker, démarrage réel
-   de simulation, verrouillage UI via `worlds.status`).
-3. Ne pas implémenter interactions, relations, événements, mémoire, mort, LLM/OpenRouter
+1. **Valider puis committer/pousser cette tranche documentaire** après vérifications (liens,
+   Mermaid, checks, diff sans secret/généré, `git ls-remote` == HEAD, working tree propre).
+2. Avant toute implémentation Phase 3, trancher les paramètres provisoires du doc temps
+   (durée tick, fréquence 1x, vitesses, snapshots) et concevoir l'API `SeededRng.getState()/setState()`
+   + la table additive `simulation_clock`.
+3. Première implémentation cible (après contrat validé) : squelette worker/simulation main-only,
+   commandes IPC de contrôle, `SimulationClock` persisté, transaction par tick, sans LLM ni
+   relations/événements/mémoires complets. Ne pas implémenter relations/événements/mémoires/mort/LLM
    avant les phases prévues.

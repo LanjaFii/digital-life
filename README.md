@@ -5,9 +5,9 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 en cours (mondes, personnages, création manuelle et bibliothèque réutilisable).
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet). Phase 2 en **conception architecturale** (aucun moteur/worker/LLM implémenté).
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
-> tests (70/70), build et smoke tests réels Electron validés. Le code réel et `PROGRESS.md` fait foi.
+> tests (88/88), build et smoke tests réels Electron validés. Le code réel et `PROGRESS.md` font foi.
 
 ## Fonctionnalités
 
@@ -39,6 +39,12 @@ conséquences calculées par le moteur.
 Évolution dynamique des personnages, moteur multi-agents dans un worker,
 relations et mémoire, mort et deuil, dialogues OpenRouter facultatifs,
 tableaux de bord et statistiques, packaging.
+
+### Documentation de conception (Phase 2, documentaire uniquement)
+- [Architecture de l'état des personnages](docs/CHARACTER_STATE_ARCHITECTURE.md)
+- [Système de relations](docs/RELATIONSHIP_SYSTEM.md)
+- [Événements, historique et souvenirs](docs/EVENT_AND_MEMORY_SYSTEM.md)
+- [Temps interne, ticks et moteur](docs/SIMULATION_TIME_AND_ENGINE.md)
 
 ## Installation portable
 

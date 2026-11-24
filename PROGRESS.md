@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : Phase 1 — Suppression d'une instance de personnage (tranche validée).
-- **Avancement approximatif** : 85 % (Phase 1).
+- **Phase** : Phase 2 — Conception du système d'évolution des personnages (**tranche documentaire uniquement**).
+- **Avancement approximatif** : Phase 1 fonctionnelle à ~85 % (CRUD instances complet) ; Phase 2 implémentation 0 % (conception en cours).
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Tranche précédente validée/poussée à `1a3d182` (création manuelle + bibliothèque). Tranche « suppression d'instance » : tests/typecheck/build/smoke réel OK, commit/push effectués et vérifiés dans cette session (voir `git log`).
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `669c785101aa0a10e6f69506d870b283c77a1510` (`feat(phase1): safe character instance deletion in preparation worlds`). Cette tranche ne modifie aucun code de simulation/schéma/IPC/UI ; elle produit le contrat architectural Phase 2.
 
 ## Fonctionnalités terminées
 
@@ -41,11 +41,21 @@
 
 ## Fonctionnalités non commencées
 
-- [ ] Phase 2 : personnages complets (évolution dynamique, édition avancée).
+- [ ] Phase 2 implémentation : aucun moteur, aucun worker, aucune évolution dynamique, aucun tick, aucune relation/événement/mémoire opérationnel, aucun appel LLM/OpenRouter.
 - [ ] Phase 3 : moteur de simulation dans un worker (démarrage réel, `currentState` évolutif, verrouillage UI effectif).
 - [ ] Phases 4 à 8 : relations/mémoire, mort, LLM, interface avancée, stabilisation.
 
-## Fichiers créés (Phase 0 / Phase 1)
+## Conception Phase 2 (documentaire, terminée dans cette tranche)
+
+- [x] Audit de l'existant réalisé (types, SQLite/migrations, validation, persistance, IPC/preload, garde `worlds.status`, UI, tests 88/88, docs).
+- [x] `docs/CHARACTER_STATE_ARCHITECTURE.md` : audit réel, séparation stable/dynamique, contrat `initialState` immuable / `currentState` évolutif, règles de cohérence, structures TS proposées, scénarios de non-régression.
+- [x] `docs/RELATIONSHIP_SYSTEM.md` : relations asymétriques `ownerId → targetId`, absence = neutre, 9 dimensions 0-100, types dérivés calculés, table `relationships` additive proposée, exemples et règles d'intégrité.
+- [x] `docs/EVENT_AND_MEMORY_SYSTEM.md` : distinction état courant / historique factuel / souvenirs subjectifs, types d'événements, `WorldEvent`/`Memory` proposés, immuabilité du journal, consolidation/oubli `faded`, frontière LLM, tests.
+- [x] `docs/SIMULATION_TIME_AND_ENGINE.md` : options de tick/fréquence (provisoires, non finales), `SimulationClock`, déterminisme/seed/PRNG sérialisable, ordre stable, snapshot puis application, transaction par tick, pause/reprise, frontière worker/main/IPC, paramètres à calibrer.
+- [x] Diagrammes Mermaid ajoutés dans les 4 documents.
+- [x] Aucune modification de code, schéma, migration, IPC, worker, UI, LLM ou donnée utilisateur.
+
+## Fichiers créés (Phase 0 / Phase 1 / Phase 2 design)
 
 Principaux Phase 0 : `package.json`, `vite.config.ts`, `tsconfig*.json`, `scripts/*`,
 `src/main/**`, `src/preload/**`, `src/renderer/**`, `src/shared/**`, `index.html`, docs.
@@ -77,6 +87,11 @@ Ajouts tranche suppression d'instance :
 - `src/renderer/components/ConfirmDeleteCharacterDialog.tsx`
 - `tests/character-deletion.test.ts`, `tests/character-deletion-ui.test.tsx`
 
+Ajouts tranche conception Phase 2 (documentaire uniquement) :
+- `docs/CHARACTER_STATE_ARCHITECTURE.md`
+- `docs/EVENT_AND_MEMORY_SYSTEM.md`
+- `docs/SIMULATION_TIME_AND_ENGINE.md`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -86,6 +101,7 @@ Ajouts tranche suppression d'instance :
 - Tranche reprise : `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/ipc/world.ipc.ts`, `src/main/services/world-store.service.ts`, `src/renderer/App.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/world-store.test.ts`, `package.json`, `package-lock.json`, docs de suivi.
 - Tranche création manuelle + bibliothèque : `src/shared/character.ts`, `src/shared/world.ts`, `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/main.ts`, `src/main/services/world-store.service.ts`, `src/main/services/character-generator.service.ts`, `src/renderer/App.tsx`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/character-generation.test.ts`, `tests/world-resume-ui.test.tsx`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
 - Tranche suppression d'instance : `src/shared/ipc.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/character.ipc.ts`, `src/preload/preload.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/world-resume-ui.test.tsx`, `tests/character-library-ui.test.tsx`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
+- Tranche conception Phase 2 (documentaire) : `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/RELATIONSHIP_SYSTEM.md` (réécrit/étendu), `docs/EVENT_AND_MEMORY_SYSTEM.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 
 ## Tests réussis
 

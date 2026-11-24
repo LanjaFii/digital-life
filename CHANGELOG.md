@@ -2,6 +2,36 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 2 (conception du système d'évolution des personnages, documentaire)
+
+### Added
+- `docs/CHARACTER_STATE_ARCHITECTURE.md` : audit de l'existant, séparation stable/dynamique,
+  contrat `initialState` immuable après démarrage / `currentState` évolutif, règles de
+  cohérence, structures TypeScript proposées, scénarios de non-régression.
+- `docs/RELATIONSHIP_SYSTEM.md` : refonte/extension de la note Phase 4 en contrat complet
+  (relations asymétriques `ownerId → targetId`, absence = neutre, 9 dimensions 0-100,
+  types dérivés calculés, table additive `relationships` proposée, exemples, intégrité).
+- `docs/EVENT_AND_MEMORY_SYSTEM.md` : distinction état courant / journal d'événements
+  factuel immuable / souvenirs personnels subjectifs, structures `WorldEvent`/`Memory`,
+  consolidation/oubli `faded` sans suppression physique, frontière LLM, tests prévus.
+- `docs/SIMULATION_TIME_AND_ENGINE.md` : options de tick/fréquence (provisoires),
+  `SimulationClock`, déterminisme PRNG sérialisable, ordre stable, snapshot puis application,
+  transaction par tick, pause/reprise, frontière worker/main/IPC, paramètres à calibrer.
+
+### Changed
+- `PROGRESS.md`, `HANDOFF.md`, `README.md` mis à jour pour refléter la tranche de conception
+  Phase 2 ; Phase 1 reste la dernière tranche code validée/poussée (`669c785`).
+
+### Technical decisions
+- Tranche **strictement documentaire** : aucun moteur, worker, tick, relation/événement/mémoire
+  opérationnel, appel OpenRouter/LLM, modification de schéma/IPC/UI, ou donnée utilisateur.
+- `initialState` devient immuable après `worlds.status = 'simulation_started'` ; seul
+  `currentState` (et structures dynamiques) évolue en simulation.
+- Une transaction SQLite par tick ; `Date.now()` interdit dans les règles ; PRNG métier
+  sérialisable requis avant implémentation.
+- Tables `relationships`/`events`/`memories`/`simulation_clock` proposées en additif seulement,
+  jamais dans cette tranche.
+
 ## 2026-11-24 — Phase 1 (suppression d'une instance de personnage)
 
 ### Added
