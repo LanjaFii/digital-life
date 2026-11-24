@@ -377,6 +377,58 @@ isolément à garantir la stabilité.
 Décision : ne pas transformer silencieusement `stop` en `pause`, et ne pas autoriser
 `start` sur `simulation_stopped` dans l'attente de cette validation.
 
+### 12.4 Recette technique précise de `forkFromStopped` [Reporté]
+
+Commande future du processus principal, **jamais** un réflexe de `startSimulation` :
+`forkFromStopped(worldId, name?)`. Elle est refusée si le monde source n'est pas
+`simulation_stopped`, si son horloge est absente/corrompue, si un tick est en cours
+(verrou du `SimulationManager`) ou si un runtime de personnage est corrompu. Aucune
+erreur de données n'est réparée silencieusement : la transaction est annulée.
+
+1. **Nouveau monde, pas une réactivation.** Insertion d'une ligne `worlds` avec un
+   nouveau `id = randomUUID()`, un nom dérivé `"<nom source> — suite"` (tronqué à 80
+   caractères, suffixe compris), `generation_mode` identique, `character_count` copié,
+   `created_at`/`updated_at = now`, `last_opened_at = NULL` et
+   `status = 'simulation_paused'`. La ligne source n'est **pas** mise à jour : ni statut,
+   ni `updated_at`, ni `last_opened_at`. Elle reste `simulation_stopped` et auditable.
+2. **Copie cohérente des personnages.** Pour chaque ligne source triée par `id`, insertion
+   d'une ligne distincte avec `id = "<newWorldId>:<sourceId>"` (préfixe identique pour
+   tous : l'ordre lexicographique relatif, donc l'ordre de départage, est préservé),
+   `world_id = newWorldId`, identité et biographie copiées, `template_id = NULL`
+   (aucun lien mutable avec la bibliothèque), `created_at = now`, `updated_at = now`.
+   Les six colonnes `initial_*_json` reçoivent les `current_*_json` de la source : la
+   branche démarre exactement de l'état final observé, pas des paramètres d'origine.
+   Les six `current_*_json` reçoivent les mêmes valeurs. `current_goals_json` est copié
+   **octet pour octet** et reste non interprété. `current_action_json` est copié en
+   profondeur (runtime complet : `active`, `recentActionIds`, `cooldowns`,
+   `lastDecision`, `interruptedCount`) afin de préserver l'historique court pertinent ;
+   aucun nouvel événement, souvenir ou relation n'est fabriqué.
+3. **Nouvelle horloge, contexte continu.** Insertion d'une ligne `simulation_clock`
+   unique pour `newWorldId` avec `tick`, `day`, `hour`, `speed` et **`rngState`** copiés
+   de la source (continuité exacte de la séquence mulberry32), `status = 'paused'`,
+   `last_processed_order = 0`, `created_at`/`updated_at = now`. Le `seed` du monde est
+   copié ; il ne ressème pas le PRNG.
+4. **Indépendance totale.** Aucune ligne n'est partagée entre les deux mondes : chaque
+   branche possède ses personnages, son runtime, son horloge et son `rngState`. Une
+   écriture, une action ou un arrêt dans la suite ne modifie jamais le monde arrêté,
+   et inversement. Les modèles de la bibliothèque restent des références en lecture
+   seule depuis la branche (`template_id = NULL`).
+5. **Transaction et persistance.** `BEGIN` avant la lecture cohérente de la source,
+   validations, toutes les insertions, `COMMIT`, puis un seul `persist(db)`. Toute
+   erreur déclenche un `ROLLBACK` complet : aucun monde partiel, aucun personnage
+   orphelin, aucun fichier écrit.
+6. **Interface explicite.** Aucun bouton « Démarrer » ne peut appeler cette commande.
+   L'UI future doit présenter une action distincte « Créer une suite », avec confirmation
+   indiquant que le monde arrêté est conservé et qu'une nouvelle sauvegarde est créée.
+   La suite s'ouvre en pause ; le démarrage est une seconde action volontaire.
+7. **Exclusions.** Pas d'héritage de relations, lieux, objets, ressources, événements,
+   souvenirs, morts ni dialogues (aucune donnée de ce type n'existe). Pas de
+   réinterprétation des objectifs persistants. Pas de remise à zéro des compteurs
+   d'échec ou d'interruption.
+
+[Reporté] service, hook IPC/preload, bouton, tests dédiés et validation produit.
+Cette recette n'est **pas implémentée** dans la tranche Phase 3C en cours.
+
 ## 13. Compatibilité services existants
 
 ### 13.1 Découpe proposée (six services purs)

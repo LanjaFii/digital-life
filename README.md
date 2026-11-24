@@ -5,9 +5,9 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C documentée** (décisions/actions autonomes : conception uniquement). Comportements autonomes (décisions/actions/relations/mort/LLM) non implémentés.
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C en implémentation** (tranche 1 : contrats et catalogue d'actions livrés ; décisions/actions exécutables non encore intégrées au tick). Relations, événements, souvenirs, mort et LLM non implémentés.
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
-> tests (148/148), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
+> tests (158/158), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
 
 ## Fonctionnalités
 
@@ -38,9 +38,9 @@ conséquences calculées par le moteur.
 - **Évolution Phase 3B** : à chaque tick, les 8 besoins et 10 émotions évoluent selon des règles déterministes et explicables (services purs, traits de personnalité, snapshot immuable, arrondi half-even aux centièmes), appliquées dans la même transaction SQLite que l'horloge. Le PRNG n'est pas consommé. Les valeurs actualisées sont visibles dans la fiche personnage ; aucune nouvelle UI.
 
 ### Planifiées (phases 3C à 8)
-Décisions/actions autonomes (**conception Phase 3C terminée, implémentation non commencée**),
-relations et mémoire, événements, mort et deuil, dialogues OpenRouter facultatifs,
-tableaux de bord et statistiques, packaging.
+Décisions/actions autonomes (**conception Phase 3C terminée, tranche 1 contrats/catalogue livrée,
+intégration au tick en cours**), relations et mémoire, événements, mort et deuil,
+dialogues OpenRouter facultatifs, tableaux de bord et statistiques, packaging.
 
 ### Documentation de conception et de règles implémentées
 - [Architecture de l'état des personnages](docs/CHARACTER_STATE_ARCHITECTURE.md)

@@ -24,6 +24,29 @@ export const DEFAULT_SIMULATION_PARAMETERS: SimulationParametersV1 = {
     emotionDelta: 10,
     healthLoss: 1.2,
   },
+  // Phase 3C : hypothèses de calibration, documentées dans
+  // docs/AUTONOMOUS_DECISION_SYSTEM.md. Le poids émotionnel est exprimé pour
+  // une échelle d'effets /100 : 10 transforme un effet de -1 en +0.10 de score.
+  decision: {
+    tieBreak: 'rng',
+    decisionScorePrecision: 3,
+    maxRngDrawsPerCharacterTick: 1,
+    needWeight: 1,
+    emotionWeight: 10,
+    traitWeight: 0.25,
+    circadianWeight: 0.1,
+    costWeight: 0.8,
+    repetitionWeight: 0.3,
+    durationWeight: 0.05,
+    minimumMotivationUrgency: 0.25,
+    immediateGoalLimit: 3,
+    criticalUrgency: 0.85,
+    trendWeight: 0.2,
+    referenceDecayFloor: 0.5,
+    maxActionDurationTicks: 8,
+    actionHistorySize: 5,
+    minTicksBeforeInterrupt: 1,
+  },
   needs: {
     hunger: {
       decay: 0.8,

@@ -117,6 +117,11 @@ export function computeCharacterTick(input: CharacterTickInput): CharacterTickRe
     rngState: input.rngState,
     characterStates,
     deltas,
+    // La Phase 3C remplacera ces tableaux par les artefacts calculés ; la
+    // tranche actuelle ne produit aucune décision ni effet d'action.
+    decisions: [],
+    actionDeltas: [],
+    actionRuntimeStates: [],
     warnings,
   };
 }

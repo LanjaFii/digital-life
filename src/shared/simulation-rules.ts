@@ -3,7 +3,9 @@
  * Aucun code Node ici : types et valeurs par défaut importables par le main
  * comme par les tests, sans Electron ni SQLite.
  */
+import type { ActionEffectDelta, CharacterActionRuntime } from './action';
 import type { CharacterEmotions, CharacterNeeds, CharacterTraits, EmotionKey, NeedKey, TraitKey } from './character';
+import type { DecisionExplanation } from './decision';
 
 /** Précision décimale des valeurs évolutives (centièmes). */
 export const SIMULATION_VALUE_PRECISION = 2;
@@ -17,6 +19,7 @@ export type TickDeltaCauseKind =
   | 'emotion_target'
   | 'trait_modifier'
   | 'baseline_recovery'
+  | 'action_effect'
   | 'clamp'
   | 'rounding';
 
@@ -61,6 +64,39 @@ export interface CharacterTickSnapshot {
   goals: ReadonlyArray<{ id: string; label: string; kind: 'primary' | 'secondary' }>;
 }
 
+/** Snapshot étendu utilisé par les règles de décision (Phase 3C). */
+export interface AutonomousDecisionSnapshot extends CharacterTickSnapshot {
+  /** Valeur par défaut si la colonne de runtime est absente. */
+  actionRuntime: CharacterActionRuntime;
+  /** Deltas passifs du tick, avant tout effet d'action. */
+  passiveNeedDeltas: Readonly<Record<NeedKey, number>>;
+  /** Déduit du nombre de personnages du tick, jamais inventé. */
+  otherCharacterExists: boolean;
+}
+
+/** Paramètres de décision versionnés, tous explicitement calibrables. */
+export interface DecisionParameters {
+  /** Départage des ex æquo : 'id' deterministe ou 'rng' conditionnel. */
+  tieBreak: 'id' | 'rng';
+  decisionScorePrecision: number;
+  maxRngDrawsPerCharacterTick: 1;
+  needWeight: number;
+  emotionWeight: number;
+  traitWeight: number;
+  circadianWeight: number;
+  costWeight: number;
+  repetitionWeight: number;
+  durationWeight: number;
+  minimumMotivationUrgency: number;
+  immediateGoalLimit: number;
+  criticalUrgency: number;
+  trendWeight: number;
+  referenceDecayFloor: number;
+  maxActionDurationTicks: number;
+  actionHistorySize: number;
+  minTicksBeforeInterrupt: number;
+}
+
 /** Entrée pure du moteur de tick. */
 export interface CharacterTickInput {
   worldId: string;
@@ -69,11 +105,15 @@ export interface CharacterTickInput {
   day: number;
   hour: number;
   seed: number;
-  /** uint32, inchangé en Phase 3B (aucune règle ne consomme le PRNG). */
+  /** uint32 ; conservé sauf départage PRNG effectif (Phase 3C). */
   rngState: number;
   /** Ordre quelconque : le service trie par identifiant avant calcul. */
   characters: readonly CharacterTickSnapshot[];
   params: SimulationParametersV1;
+  /** Surcharge optionnelle des paramètres de décision (tests, rejeux). */
+  decisionParams?: Partial<DecisionParameters>;
+  /** Runtime par identifiant ; valeur par défaut si absent. */
+  actionRuntimeByCharacter?: Readonly<Record<string, CharacterActionRuntime>>;
 }
 
 /** Résultat pur d'un tick : aucun effet Electron/SQLite. */
@@ -87,6 +127,10 @@ export interface CharacterTickResult {
     emotions: CharacterEmotions;
   }>;
   deltas: TickDelta[];
+  /** Explications complètes, calculées même pour une action poursuivie. */
+  decisions: DecisionExplanation[];
+  actionDeltas: ActionEffectDelta[];
+  actionRuntimeStates: Array<{ characterId: string; runtime: CharacterActionRuntime }>;
   warnings: string[];
 }
 
@@ -179,6 +223,8 @@ export interface SimulationParametersV1 {
     emotionDelta: number;
     healthLoss: number;
   };
+  /** Phase 3C : poids et politiques de décision, calibrables indépendamment. */
+  decision: DecisionParameters;
   needs: Record<NeedKey, NeedRule>;
   emotions: Record<EmotionKey, EmotionRule>;
 }

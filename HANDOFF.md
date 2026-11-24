@@ -3,16 +3,19 @@
 ## Où en est le développement
 
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
-- **HEAD au démarrage de la tranche** : `1b391458ee5f8bb0da27ffd05950bdfd7935b5c7`
-  (`feat(phase3b): implement deterministic need and emotion evolution`), identique à
+- **HEAD au démarrage de l'implémentation** : `c18e4814391f2971224e77be2b7e77895af4e188`
+  (`docs(phase3c): specify autonomous decision and action architecture`), identique à
   `origin/main`, arbre propre.
-- **Tranche courante** : **Phase 3C — conception documentaire du système de décisions
-  et d'actions autonomes**, terminée. Aucune implémentation, aucun code applicatif,
-  schéma SQLite, migration, worker, IPC, preload, UI ou LLM modifié.
+- **Tranche courante** : **Phase 3C — implémentation progressive**. Tranche 1 terminée :
+  contrats partagés, catalogue versionné et recette documentée de `forkFromStopped`.
+  Aucune décision ni effet d'action n'est encore intégré au tick ; aucun schéma SQLite,
+  IPC, preload, UI ni appel LLM modifié.
 - **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution
-  passive déterministe des 8 besoins et 10 émotions. **Aucune décision ni action
-  autonome** n'existe encore. Aucun environnement, lieu, objet, ressource partagée,
-  relation, événement, souvenir, mort ni dialogue n'existe.
+  passive déterministe des 8 besoins et 10 émotions. Le résultat de tick contient désormais
+  trois tableaux vides (`decisions`, `actionDeltas`, `actionRuntimeStates`) en attente de la
+  tranche 2. **Aucune décision ni action autonome exécutable** n'existe encore. Aucun
+  environnement, lieu, objet, ressource partagée, relation, événement, souvenir, mort ni
+  dialogue n'existe.
 
 ## Ce qui vient d'être réalisé (Phase 3C — documentaire)
 
@@ -30,6 +33,25 @@
 - `docs/SIMULATION_ENGINE.md` : encart précisant que le cycle 16 étapes reste [Planifié]
   et renvoyant vers les trois documents Phase 3C.
 - `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` mis à jour.
+
+## Ce qui vient d'être réalisé (Phase 3C — tranche 1)
+
+- `src/shared/action.ts` : types du catalogue (11 actions), préconditions dont `any_of`,
+  effets, runtime sérialisable, `DecisionRule` étendu de `action_failed`, valeur par défaut
+  du runtime.
+- `src/shared/decision.ts` : motivations, objectifs immédiats, composantes de score,
+  `ScoredCandidate`, `DecisionExplanation`, `DecisionResult`.
+- `src/shared/simulation-rules.ts` : `AutonomousDecisionSnapshot`, `DecisionParameters`,
+  entrées/sorties additives du tick, cause `action_effect`.
+- `src/main/services/simulation-parameters.service.ts` : paramètres de décision par défaut
+  (`emotionWeight = 10` : hypothèse de calibration documentée).
+- `src/main/services/action-registry.service.ts` : catalogue Tier A/Tier B, validation
+  stricte, lookup, listes deterministes.
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md` §12.4 : recette complète de `forkFromStopped`
+  (nouveau monde et nouvelles lignes, source intacte, horloge/rngState copiés, branche
+  en pause, transaction unique). **Non implémenté, non exposé, à valider par le produit.**
+- `tests/action-registry.test.ts` : 10 tests du catalogue.
+- Validations : check-deps OK, typecheck 4 configs OK, tests **158/158** (16 fichiers).
 
 ## Décisions de conception Phase 3C
 

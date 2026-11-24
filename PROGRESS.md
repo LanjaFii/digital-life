@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (conception documentaire terminée ; aucune implémentation).
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C **documentée et validée** ; comportements autonomes (décisions/actions/relations/événements/mort/LLM) non implémentés.
+- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (implémentation progressive ; tranche 1 contrats + catalogue terminée).
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C documentée et validée, **tranche 1 implémentée/validée** (contrats partagés, catalogue versionné, recette `forkFromStopped` documentée) ; services de décision, intégration au tick et persistance du runtime non encore livrés.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD au démarrage de cette tranche : `1b391458ee5f8bb0da27ffd05950bdfd7935b5c7` (`feat(phase3b): implement deterministic need and emotion evolution`), identique à `origin/main`, arbre propre.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD au démarrage de l'implémentation Phase 3C : `c18e4814391f2971224e77be2b7e77895af4e188` (`docs(phase3c): specify autonomous decision and action architecture`), identique à `origin/main`, arbre propre.
 
 ## Fonctionnalités terminées
 
@@ -76,10 +76,22 @@
 - [x] Ajustement justifié observé en simulation longue : saturation de `happiness` à 100 en ~50 ticks sur scénario stable → pression positive plafonnée par la marge vers la baseline (cause `baseline.headroom`) ; documentation mise à jour. Aucun coefficient arbitrairement modifié.
 - [x] Documentation mise à jour : 3 docs de conception (statut implémenté + décisions définitives), PROGRESS, HANDOFF, CHANGELOG.
 
+## Phase 3C — Tranche 1 (contrats et catalogue, terminée)
+
+- [x] Audit préalable : branche `main`, HEAD = `origin/main` = `c18e481`, arbre propre ; AGENTS/PROGRESS/HANDOFF relus ; trois documents Phase 3C lus intégralement ; services Phase 3B et `stepSimulation` réexaminés.
+- [x] `src/shared/action.ts` : 11 identifiants stables, catégories, préconditions (dont `any_of`), effets, délais, cooldowns, machine à états, runtime sérialisable et valeur par défaut.
+- [x] `src/shared/decision.ts` : motivations, objectifs immédiats, scores, explications complètes, contrat d'entrée du moteur de sélection.
+- [x] `src/shared/simulation-rules.ts` : extension additive (snapshot étendu, paramètres de décision versionnés, champs de résultat `decisions`/`actionDeltas`/`actionRuntimeStates`, cause `action_effect`) ; `current_goals_json` reste hors écriture.
+- [x] `src/main/services/simulation-parameters.service.ts` : paramètres de décision par défaut, poids explicitement identifiés comme hypothèses calibrables.
+- [x] `src/main/services/action-registry.service.ts` : catalogue statique des 11 actions, Tier A exécutables / Tier B désactivés, validation stricte, lookup et listes deterministes.
+- [x] `docs/AUTONOMOUS_DECISION_SYSTEM.md` §12.4 : recette technique précise de `forkFromStopped` (nouveau monde, nouvelles lignes, horloge/PRNG copiés, branche en pause, source intacte, transaction unique) ; **non implémenté**.
+- [x] `tests/action-registry.test.ts` : validation du registre, 11 identifiants, Tier B jamais disponible, `idle` sans effet, bornes de durée, absence d'effets non numériques, règle d'échec du sommeil.
+- [x] Validations : check-deps OK, typecheck 4 configs OK, tests **158/158 passés** (16 fichiers). Build non rejoué : aucun changement de bundle dans cette tranche de contrats.
+
 ## Fonctionnalités non commencées
 
 - [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
-- [ ] Phase 3B+ : décisions autonomes, objectifs, actions, conséquences.
+- [ ] Phase 3C : tranche 1 livrée ; services de décision/action, intégration au tick et persistance du runtime restent à implémenter.
 - [ ] Phases 4 à 8 : relations, événements, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
 ## Conception Phase 2 (documentaire, terminée dans cette tranche)
@@ -161,6 +173,12 @@ Ajouts tranche conception Phase 3C (documentaire uniquement) :
 - `docs/ACTION_SYSTEM.md`
 - `docs/GOAL_SELECTION_SYSTEM.md`
 
+Ajouts tranche implémentation Phase 3C — tranche 1 :
+- `src/shared/action.ts`
+- `src/shared/decision.ts`
+- `src/main/services/action-registry.service.ts`
+- `tests/action-registry.test.ts`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -175,6 +193,7 @@ Ajouts tranche conception Phase 3C (documentaire uniquement) :
 - Tranche conception Phase 3B (documentaire) : `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (liens docs uniquement, si pertinent). Aucun fichier applicatif modifié.
 - Tranche implémentation Phase 3B : `src/main/services/world-store.service.ts` (tick atomique + hook de test rollback), `tests/simulation.test.ts` (intégration SQLite), `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (si mention Phase 3B).
 - Tranche conception Phase 3C (documentaire) : `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md`, `docs/SIMULATION_ENGINE.md` (encart de statut), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`. Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI ou LLM modifié.
+- Tranche implémentation Phase 3C — tranche 1 : `src/shared/simulation-rules.ts`, `src/main/services/simulation-parameters.service.ts`, `src/main/services/character-tick.service.ts` (retour vide des nouveaux tableaux), `docs/AUTONOMOUS_DECISION_SYSTEM.md` (§12.4), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 
 ## Tests réussis
 
@@ -186,6 +205,7 @@ Ajouts tranche conception Phase 3C (documentaire uniquement) :
 - **Smoke Electron réel Linux** (2026-11-24, `--no-sandbox --disable-gpu`, CDP, 2 lancements avec redémarrage réel) : création monde `SMOKE-SIM` (seed 123, 2 personnages), start tick 0 running, pause, step -> tick 1, vitesse 10x, fermeture, relance restaurée (tick 1, paused, `rngState=2246822416`, world `simulation_paused`), resume, step -> tick 2, suppression monde smoke, `SMOKE_OK`. DB utilisateur sauvegardée/restaurée (`/tmp/dl-worlds-backup.sqlite`) avant commit.
 - **Validation tranche implémentation Phase 3B** : check-deps OK, typecheck 4 configs OK, tests **148/148 passés** (15 fichiers), build OK. Simulations longes 24/72/168/720/3000 ticks + 6 profils documentés : bornes 0–100 respectées, déterminisme confirmé, pas d'oscillation artificielle ni de saturation sans cause active, PRNG inchangé.
 - **Validation tranche conception Phase 3C (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **148/148 passés** (15 fichiers, aucun code modifié), build OK. Vérification croisée : 3 documents créés avec diagrammes Mermaid, contrats TypeScript proposés, distinction décisions définitives / hypothèses / reporté, audit Git (HEAD = `origin/main` = `1b39145`, arbre propre avant tranche), aucun secret ni fichier généré ajouté.
+- **Validation tranche implémentation Phase 3C — tranche 1** : check-deps OK, typecheck 4 configs OK, tests **158/158 passés** (16 fichiers). Aucun build rejoué : contrats purs uniquement, aucun bundle modifié. Audit Git avant tranche : HEAD local = `origin/main` = `c18e481`, arbre propre, `git fetch origin --dry-run` sans changement.
 
 ## Tests échoués
 
@@ -208,4 +228,4 @@ Ajouts tranche conception Phase 3C (documentaire uniquement) :
 
 ## Prochaine tâche précise
 
-Finaliser la tranche Git Phase 3C (vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre). Ensuite, uniquement sur validation explicite : implémentation Phase 3C (décisions/actions autonomes) en suivant les trois documents de conception, ou politique de reprise d'un monde `simulation_stopped` (branche explicite recommandée, à valider par le produit avant implémentation). Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.
+Finaliser la tranche Git de la tranche 1 (inspection diff, absence secrets/data, commit, push `origin/main` sans force, vérification hash distant et arbre propre). Ensuite : implémenter les services purs `goal-selection`, `action-candidacy`, `action-scoring`, `decision-engine`, `action-execution` avec leurs tests unitaires ; puis seulement intégrer au tick et à SQLite. La politique `forkFromStopped` reste documentée et **non implémentée** tant que le produit ne l'a pas validée. Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.

@@ -2,6 +2,34 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3C, tranche 1 (contrats partagés et catalogue d'actions)
+
+### Added
+- `src/shared/action.ts` : 11 identifiants d'actions, catégories, préconditions (dont `any_of`), effets nominaux, coûts, durées, cooldowns, `ActionFailureRule`, intentions non numériques réservées mais jamais exécutées, runtime sérialisable et valeur par défaut.
+- `src/shared/decision.ts` : motivations, objectifs immédiats, composantes de score, candidats évalués, explication complète et contrat d'entrée du moteur de sélection.
+- `src/main/services/action-registry.service.ts` : catalogue statique versionné, validation stricte, lookup et listes deterministes ; Tier B déclaré mais infaisable sans environnement.
+- `tests/action-registry.test.ts` : validation, identifiants, Tier A/B, `idle` sans effet, bornes de durée, absence d'effets non numériques, règle d'échec du sommeil.
+
+### Changed
+- `src/shared/simulation-rules.ts` : extension additive (snapshot étendu, paramètres de décision, cause `action_effect`, tableaux `decisions`/`actionDeltas`/`actionRuntimeStates` dans le résultat).
+- `src/main/services/simulation-parameters.service.ts` : paramètres de décision par défaut, tous identifiés comme hypothèses calibrables.
+- `src/main/services/character-tick.service.ts` : retourne les trois nouveaux tableaux vides en attendant l'intégration des services ; comportement Phase 3B inchangé.
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md` §12.4 : recette technique précise de `forkFromStopped`, explicitement **non implémentée**.
+- `PROGRESS.md`, `HANDOFF.md`, `README.md` : état d'implémentation Phase 3C tranche 1.
+
+### Fixed
+- Aucun bug applicatif corrigé ; aucune valeur de simulation existante modifiée.
+
+### Removed
+- Aucun.
+
+### Technical decisions
+- `current_goals_json` reste hors de toute écriture du moteur ; `CharacterGoal.label` reste du texte libre non interprété.
+- Le catalogue contient une règle d'échec documentée pour `sleep` (soif < 15, `keep_partial`) ; les effets déjà appliqués ne sont pas annulés.
+- `DecisionRule` gagne `action_failed` pour distinguer l'échec métier de l'interruption ; les erreurs techniques restent des erreurs de tick avec rollback.
+- `forkFromStopped` reste reporté : nouvel `id`, nouvelles lignes, source inchangée, horloge/`rngState` copiés, branche en pause, aucune réactivation silencieuse.
+- Validations : check-deps OK, typecheck 4 configs OK, tests **158/158** (16 fichiers). Build non rejoué (aucun bundle modifié).
+
 ## 2026-11-24 — Phase 3C (conception du système de décisions et d'actions autonomes, documentaire)
 
 ### Added
