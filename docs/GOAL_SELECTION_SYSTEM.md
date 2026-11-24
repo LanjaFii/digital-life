@@ -137,7 +137,7 @@ sous l'urgence du candidat suivant.
 - L'état nécessaire (`previousImmediateGoals` : identifiant + urgence) est [Reporté]
   stocké dans `CharacterActionRuntime` (déjà prévu pour l'historique des actions).
 - Sans cet état, la Phase 3C peut fonctionner en mode **sans hystérésis** : le calcul reste
-  déterministe et rejeable ; l'hystérésis est une amélioration de stabilité, pas une
+  déterministe et rejouable ; l'hystérésis est une amélioration de stabilité, pas une
   condition de correction.
 - **Décision** : l'hystérésis ne doit jamais modifier une valeur persistée ni geler un
   besoin critique : si `urgency >= criticalUrgency` (provisoire 0.85), l'objectif critique

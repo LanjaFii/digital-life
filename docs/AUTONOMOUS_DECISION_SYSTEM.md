@@ -2,7 +2,7 @@
 
 > **Statut : implémenté (tranche 3).** Le tick applique désormais, dans cet ordre :
 > évolution passive des besoins/émotions (Phase 3B), objectifs immédiats, évaluation
-> des actions, décision deterministe explicable, effets numériques, quantification
+> des actions, décision déterministe explicable, effets numériques, quantification
 > finale unique puis persistance atomique du runtime et du PRNG. Les tranches 1 et 2
 > avaient livré les contrats et sept services purs ; la tranche 3 les branche sur le tick
 > et ajoute la colonne `current_action_json`. Aucun IPC, renderer, worker ni appel LLM
@@ -37,7 +37,7 @@
 | `stepSimulation()` | `BEGIN` avant chargement → snapshot cohérent → calcul pur → écritures → `upsertClock` → `COMMIT` → **un seul** `persist(db)` → rollback total sur erreur. | Toute écriture Phase 3C (runtime, `rngState`) entre dans **la même transaction**. |
 | `writeTickCharacterStates()` | Écrit `needs_json`/`emotions_json` + miroirs `current_*` + `updated_at`. `current_goals_json` n'est pas écrit. | L'ajout futur de `current_action_json` doit suivre le même chemin transactionnel. |
 | `SimulationClock` | `tick`, `day`, `hour`, `status`, `speed`, `rngState` (uint32), `lastProcessedOrder` (0). | `rngState` pourra être consommé ; `lastProcessedOrder` reste 0 tant qu'aucun ordre intra-tick n'est requis. |
-| `SeededRng` | mulberry32, `getState/setState`, `next/int/pick/chance`. | Départage éventuel, avec consommation tracée et rejeable. |
+| `SeededRng` | mulberry32, `getState/setState`, `next/int/pick/chance`. | Départage éventuel, avec consommation tracée et rejouable. |
 | Worker / Manager | Worker = planification/signaux uniquement ; main = seul écrivain SQLite, verrou par monde, anti double-tick, broadcast statut. | Les services de décision restent **côté main**, purs, sans Worker ni SQLite. |
 | `TickDelta[]` | Calculés avec causes explicables, **non exposés** via IPC/UI. | Les explications de décision suivront la même politique : calculées, non massivement persistées. |
 | `simulation_stopped` | `startSimulation()` refuse explicitement la reprise ; `stopSimulation()` est terminal ; recovery `running → paused` au redémarrage. | Aucun changement de comportement dans cette tranche (politique recommandée §12). |
@@ -288,7 +288,7 @@ Protocole définitif si `tieBreak = 'rng'` :
 7. si `tieBreak = 'id'`, aucun tirage n'a lieu et `rngState` reste inchangé.
 
 Justification : cela satisfait l'architecture cible « PRNG.seedé + explication »
-(AGENTS.md §8) sans introduire d'aléa dans les conséquences, tout en restant rejeable
+(AGENTS.md §8) sans introduire d'aléa dans les conséquences, tout en restant rejouable
 après redémarrage. La consommation est **conditionnelle**, donc les simulations sans
 ex æquo conservent un `rngState` identique à la Phase 3B.
 

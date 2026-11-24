@@ -8,12 +8,18 @@
 > [ACTION_SYSTEM.md](ACTION_SYSTEM.md) et
 > [GOAL_SELECTION_SYSTEM.md](GOAL_SELECTION_SYSTEM.md). Les étapes 5 et 10 à 15 restent
 > reportées (aucune mémoire, interaction, relation, événement ni mort implémentée).
+>
+> **Phase 3D [Planifié]** : la consolidation de l'explicabilité, de la persistance et du
+> calcul en worker est décrite dans [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Aucun code
+> n'a été modifié par cette conception.
 
 ## Principe
 
-Le moteur est indépendant de l'interface. Il s'exécute dans un worker thread du
-processus principal et communique par messages : commandes (`start`, `pause`,
-`speed`, `step`, `stop`) et événements (`cycle`, `event`, `error`, `state`).
+Le moteur est indépendant de l'interface. **Dans le code actuel**, le calcul des règles
+tourne dans le processus principal ; le worker `simulation.worker.ts` ne fait que
+planifier les ticks et envoyer des signaux (`tick`, `error`, `ready`). La Phase 3D propose
+un second worker dédié au calcul pur, sans déplacer SQLite. Le protocole cible est décrit
+dans [WORKER_TICK_PROTOCOL.md](WORKER_TICK_PROTOCOL.md).
 
 ## Cycle (16 étapes)
 
@@ -36,15 +42,18 @@ processus principal et communique par messages : commandes (`start`, `pause`,
 
 ## Décisions explicables
 
-Chaque décision importante enregistre un objet `DecisionExplanation` : score des
-actions, facteurs dominants, état du PRNG, cycle, action retenue. Ces explications
-sont consultables dans la fiche personnage (onglet Historique, phase 7).
+Le moteur calcule un objet `DecisionExplanation` par personnage et par tick : score des
+actions, facteurs dominants, état du PRNG, cycle, action retenue. **Ces explications ne
+sont pas encore persistées ni consultables** : la Phase 3D propose
+[DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md) et l'interface minimale
+[DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md). L'onglet Historique de la phase 7
+reste [Planifié].
 
 ## Anti-boucles
 
 - Cooldown par action et par personnage.
 - Historique glissant des dernières actions.
-- Bonus de exploration contrôlé après répétition excessive.
+- Bonus d’exploration contrôlé après répétition excessive.
 - Score initialisé avec le contexte spatial et les ressources disponibles.
 
 ## Reproductibilité

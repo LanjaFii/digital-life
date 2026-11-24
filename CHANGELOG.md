@@ -2,6 +2,36 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3D (conception du moteur, documentaire, non implémentée)
+
+### Added
+- `docs/PHASE_3D_DESIGN.md` : architecture cible et découpage en quatre tranches autonomes (3D-A historique, 3D-B persistance/verrous, 3D-C worker de calcul, 3D-D IPC/UI), avec objectifs, fichiers prévus, SQLite, contrats, dépendances, tests, critères d'acceptation, risques et exclusions.
+- `docs/DECISION_HISTORY_SYSTEM.md` : contrat `DecisionRecordV1`, table `decision_records`, validation stricte, migration additive, distinction avec le journal canonique Phase 5.
+- `docs/WORKER_TICK_PROTOCOL.md` : protocole versionné du second worker de calcul, corrélation par `requestId`, gestion des doublons/tardifs/timeouts/recréation et plan Golden Hash.
+- `docs/SAFE_PERSISTENCE.md` : persistance `temp + fsync + SHA-256 + rename`, restauration de la base mémoire, verrou global ordonné et suppression de monde sérialisée.
+- `docs/WORLD_STORE_REFACTORING.md` : façade stable et extraction progressive en neuf modules, helpers de test conservés.
+- `docs/DECISION_INSPECTOR_UI.md` : deux canaux IPC de lecture, filtres bornés, throttle 500 ms, jeton de requête, états et tests.
+
+### Changed
+- `PROGRESS.md` et `HANDOFF.md` : Phase 3D marquée conçue et en attente de validation ; constats corrigés sur le tick main, `getWorld()`, `worldLocks` et le renderer.
+- `docs/DATABASE.md` : état réel Phase 3C, `current_action_json`, `current_goals_json`, tick atomique et tables 3D planifiées.
+- `docs/ARCHITECTURE.md` : séparer worker planificateur et worker de calcul planifié, rappeler que SQLite reste dans le main.
+- `docs/SIMULATION_ENGINE.md` : corriger l'affirmation selon laquelle le calcul tourne déjà dans un worker et préciser que les explications ne sont pas persistées.
+- `docs/EVENT_AND_MEMORY_SYSTEM.md` : frontière entre historique technique 3D et journal canonique Phase 5.
+- `README.md` : statut Phase 3D, liens de conception et correction du nombre de tests (215/215).
+
+### Fixed
+- Correction de l'audit initial : worker de calcul dédié, ordre des tranches, absence de FK historique vers `characters`, restauration mémoire après échec de `persist()`, façade de store conservée, UI en dernière tranche.
+- Intégration de l'audit indépendant : payload/hash et colonnes d'historique alignés, verrous monde/global distincts, `beforeBuffer` exporté après reprise du verrou global, nettoyage de `worldLocks` corrigé dans la conception, recréation du worker sans `simulationGetStatus()`, `characterName` capturé dans `decision_records`, constats obsolètes et orthographe corrigés.
+
+### Removed
+- Aucun.
+
+### Technical decisions
+- Aucun code applicatif, schéma SQLite, migration, IPC, preload, UI, worker, donnée utilisateur ni appel LLM modifié.
+- Implémentation bloquée jusqu'à validation explicite de la conception Phase 3D, y compris les décisions ouvertes de `docs/PHASE_3D_DESIGN.md` §10 : rétention/archivage, export manuel, timeout worker 30 s et `engineVersion`.
+- Validations documentaires rejouées : check-deps OK, typecheck 4 configs OK, tests **215/215** (22 fichiers), build OK, `git diff --check` OK et liens Markdown locaux valides.
+
 ## 2026-11-24 — Phase 3C, tranche 3 (intégration au tick et persistance atomique)
 
 ### Added
@@ -37,7 +67,7 @@ Format : entrées datées, catégories Added / Changed / Fixed / Removed / Techn
 - `src/main/services/decision-engine.service.ts` : poursuite d'action longue, interruption conditionnée par 4 critères, règles d'échec, `forced_idle`, départage par identifiant ou PRNG (un seul tirage), `DecisionExplanation` complète.
 - `src/main/services/action-runtime.service.ts` : parse strict et sérialisation du runtime, transitions démarrer/poursuivre/interrompre/échouer, cooldowns, historique borné.
 - `src/main/services/action-execution.service.ts` : effets nominaux modulés par les traits et bornés par la marge, baseline des émotions négatives, quantification unique, `ActionEffectDelta`, refus du Tier B et des effets non numériques.
-- `tests/phase3c-fixtures.ts` et six fichiers de test : 51 tests unitaires des services (affamé, anxieux, sociable/indépendant, coûts, répétition, nuit, faisabilité, cooldown, départage rejeable, poursuite, interruption, échec, corruption, bornes d'effets).
+- `tests/phase3c-fixtures.ts` et six fichiers de test : 51 tests unitaires des services (affamé, anxieux, sociable/indépendant, coûts, répétition, nuit, faisabilité, cooldown, départage rejouable, poursuite, interruption, échec, corruption, bornes d'effets).
 
 ### Changed
 - `src/shared/decision.ts` : `GoalSelectionInput`, `DecisionRng`, `interruptionScored` (deuxième jeu de candidats évalué sans action active).
@@ -63,7 +93,7 @@ Format : entrées datées, catégories Added / Changed / Fixed / Removed / Techn
 ### Added
 - `src/shared/action.ts` : 11 identifiants d'actions, catégories, préconditions (dont `any_of`), effets nominaux, coûts, durées, cooldowns, `ActionFailureRule`, intentions non numériques réservées mais jamais exécutées, runtime sérialisable et valeur par défaut.
 - `src/shared/decision.ts` : motivations, objectifs immédiats, composantes de score, candidats évalués, explication complète et contrat d'entrée du moteur de sélection.
-- `src/main/services/action-registry.service.ts` : catalogue statique versionné, validation stricte, lookup et listes deterministes ; Tier B déclaré mais infaisable sans environnement.
+- `src/main/services/action-registry.service.ts` : catalogue statique versionné, validation stricte, lookup et listes déterministes ; Tier B déclaré mais infaisable sans environnement.
 - `tests/action-registry.test.ts` : validation, identifiants, Tier A/B, `idle` sans effet, bornes de durée, absence d'effets non numériques, règle d'échec du sommeil.
 
 ### Changed

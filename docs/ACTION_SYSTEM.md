@@ -16,7 +16,7 @@
 | `CharacterTickSnapshot` | `characterId`, `traits`, `needs`, `emotions`, `goals` en lecture seule. | Le snapshot d'action doit être **étendu** (additif) avec un runtime d'action ; aucun autre contexte n'est disponible. |
 | `computeCharacterTick()` | Orchestration pure : `projectNeeds` → `projectEmotions` → `finalizeCharacter`. | Les effets d'action doivent s'appliquer aux **valeurs projetées**, avant la quantification finale unique. |
 | `writeTickCharacterStates()` | Écrit `emotions_json`/`needs_json` + miroirs `current_*`, `updated_at`. | Aucune écriture d'action aujourd'hui ; l'ajout futur doit rester dans la même transaction. |
-| `SimulationClock.rngState` | uint32 mulberry32, conservé tel quel en Phase 3B. | La Phase 3C peut le consommer **uniquement** avec un protocole documenté et rejeable (voir `AUTONOMOUS_DECISION_SYSTEM.md` §9). |
+| `SimulationClock.rngState` | uint32 mulberry32, conservé tel quel en Phase 3B. | La Phase 3C peut le consommer **uniquement** avec un protocole documenté et rejouable (voir `AUTONOMOUS_DECISION_SYSTEM.md` §9). |
 | `lastProcessedOrder` | Toujours 0. | Aucun ordre intra-tick d'action n'existe ; l'ordre sera déterminé par le tri des identifiants. |
 | Aucun environnement | Aucune table/colonnes `locations`, `objects`, `resources`, `events`, `relationships`, `memories`. | Les actions dépendantes d'un environnement sont **classées [Reporté]** et non simulées. |
 | `SeededRng` | `next()`, `int()`, `pick()`, `chance()`, `getState()`, `setState()`. | Disponible pour un départage éventuel, jamais pour inventer un contexte absent. |

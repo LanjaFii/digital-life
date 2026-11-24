@@ -5,9 +5,9 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C tranche 3 terminée** (décisions et actions autonomes deterministes intégrées au tick, runtime et PRNG persistés atomiquement ; commitée et poussée). Relations, événements, souvenirs, mort et LLM non implémentés.
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C tranche 3 terminée** (décisions et actions autonomes déterministes intégrées au tick, runtime et PRNG persistés atomiquement ; commitée et poussée). Relations, événements, souvenirs, mort et LLM non implémentés.
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
-> tests (209/209), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
+> tests (215/215), build et smoke test Electron réel Linux validés. La conception Phase 3D est documentée mais non implémentée. Le code réel et `PROGRESS.md` font foi.
 
 ## Fonctionnalités
 
@@ -38,9 +38,15 @@ conséquences calculées par le moteur.
 - **Évolution Phase 3B** : à chaque tick, les 8 besoins et 10 émotions évoluent selon des règles déterministes et explicables (services purs, traits de personnalité, snapshot immuable, arrondi half-even aux centièmes), appliquées dans la même transaction SQLite que l'horloge. Les valeurs actualisées sont visibles dans la fiche personnage ; aucune nouvelle UI.
 - **Décisions/actions Phase 3C (tranche 3)** : à chaque tick, objectifs immédiats, évaluation des actions réalisables, décision explicable (PRNG seulement en ex æquo), effets numériques et machine à états des actions longues ; runtime d'action (`current_action_json`), états et `rngState` persistés dans la même transaction. Aucun appel LLM, aucune ressource ni lieu inventé. Aucune nouvelle UI.
 
-### Planifiées (tranches 3C complémentaires et phases 4 à 8)
-Relations et mémoire, événements, mort et deuil, dialogues OpenRouter facultatifs,
-tableaux de bord et statistiques, packaging. Restent reportés : historique persistant des actions, `forkFromStopped`, explications complètes stockées, actions Tier B (environnement).
+### Planifiées (Phase 3D puis phases 4 à 8)
+**Phase 3D [Planifié, conception terminée]** : historique persistant des décisions,
+persistance atomique sécurisée, calcul du tick en worker dédié, refactorisation progressive
+du store et inspecteur minimal. Relations et mémoire, événements canoniques, mort et deuil,
+dialogues OpenRouter facultatifs, tableaux de bord et statistiques, packaging.
+Restent reportés : `forkFromStopped`, hystérésis des objectifs, actions Tier B
+(environnement), purge/archivage de l'historique. Les décisions encore ouvertes (rétention,
+export, timeout worker, `engineVersion`) sont listées dans
+[PHASE_3D_DESIGN.md](docs/PHASE_3D_DESIGN.md) §10.
 
 ### Documentation de conception et de règles implémentées
 - [Architecture de l'état des personnages](docs/CHARACTER_STATE_ARCHITECTURE.md)
@@ -53,6 +59,12 @@ tableaux de bord et statistiques, packaging. Restent reportés : historique pers
 - [Système de décisions autonomes (Phase 3C implémentée)](docs/AUTONOMOUS_DECISION_SYSTEM.md)
 - [Système d'actions (Phase 3C implémentée)](docs/ACTION_SYSTEM.md)
 - [Sélection des objectifs et motivations (Phase 3C implémentée)](docs/GOAL_SELECTION_SYSTEM.md)
+- [Phase 3D — Consolidation du moteur (conçue, non implémentée)](docs/PHASE_3D_DESIGN.md)
+- [Historique technique des décisions (Phase 3D planifiée)](docs/DECISION_HISTORY_SYSTEM.md)
+- [Protocole de calcul du tick en worker (Phase 3D planifiée)](docs/WORKER_TICK_PROTOCOL.md)
+- [Persistance sécurisée de SQLite (Phase 3D planifiée)](docs/SAFE_PERSISTENCE.md)
+- [Refactorisation progressive du store (Phase 3D planifiée)](docs/WORLD_STORE_REFACTORING.md)
+- [Inspecteur de décisions — UI minimale (Phase 3D planifiée)](docs/DECISION_INSPECTOR_UI.md)
 
 ## Installation portable
 

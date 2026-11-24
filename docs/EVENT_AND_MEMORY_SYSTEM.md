@@ -1,22 +1,29 @@
 # Événements, historique et souvenirs — conception Phase 2
 
-> **Statut : proposition architecturale. Aucun événement, historique ni souvenir n'est
-> implémenté aujourd'hui.** Ce document unifie et précise les notes préexistantes
-> `docs/EVENT_SYSTEM.md` et `docs/MEMORY_SYSTEM.md` (qui restent en place comme références
-> historiques) et définit le contrat cible pour les phases 3 à 5. Aucun code, aucune table
-> et aucune modification de schéma dans cette tranche.
+> **Statut : proposition architecturale. Aucun événement canonique, aucun journal
+> d'événements et aucun souvenir persistant ne sont implémentés aujourd'hui.** L'historique
+> technique des décisions est documenté pour la Phase 3D mais non implémenté. Ce document
+> unifie et précise les notes préexistantes `docs/EVENT_SYSTEM.md` et
+> `docs/MEMORY_SYSTEM.md` (qui restent en place comme références historiques) et définit le
+> contrat cible pour les phases 3 à 5. Aucun code, aucune table et aucune modification de
+> schéma dans cette tranche.
 
 ## 1. Audit : ce qui existe et ce qui manque
 
 - Existe : les types `CharacterState` (traits/émotions/besoins/objectifs), les colonnes
   `initial_*_json` / `current_*_json`, le statut `worlds.status`, un PRNG déterministe,
-  une persistance SQLite fiable, des tests de CRUD/migration.
-- N'existe pas : table d'événements, journal, table de souvenirs, moteur, tick, décision,
-  `src/main/simulation/` est vide. Aucun `DecisionExplanation`, aucun type `EventType`,
-  aucun appel LLM. Les docs `EVENT_SYSTEM.md` / `MEMORY_SYSTEM.md` décrivent des cibles
-  [Planifié], pas du fonctionnel.
-- Conséquence : il n'existe aujourd'hui **aucune traçabilité** d'un changement d'état.
-  Le seul horodatage est `characters.updated_at` (date réelle de dernière écriture).
+  un worker planificateur, une horloge persistée, un tick SQLite atomique, des décisions
+  Phase 3C avec `DecisionExplanation`, une persistance SQLite fiable et des tests de
+  CRUD/migration/simulation longue.
+- N'existe pas : table d'événements, journal canonique, table de souvenirs, type
+  `EventType`, appel LLM et historique technique persistant. Les docs `EVENT_SYSTEM.md` /
+  `MEMORY_SYSTEM.md` décrivent des cibles [Planifié], pas du fonctionnel.
+- Conséquence : il n'existe **aucun journal d'événements persistant**. Des horodatages
+  réels existent (`characters.updated_at`, `worlds.updated_at`/`last_opened_at`,
+  `simulation_clock.created_at`/`updated_at`) et des `TickDelta[]` ainsi que des
+  `DecisionExplanation` sont calculés à chaque tick, mais ces artefacts ne sont pas
+  persistés aujourd'hui. La Phase 3D documente l'historique technique dans
+  [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md).
 
 ## 2. Trois notions à ne pas confondre
 
@@ -89,11 +96,13 @@ export interface StateChange {
 }
 ```
 
-`DecisionExplanation` (déjà esquissé dans `docs/SIMULATION_ENGINE.md`) reste **séparé**
-de l'événement : il contient le score de chaque action candidate, les facteurs dominants,
-l'état du PRNG au moment du choix, le tick et l'action retenue. Un événement peut référencer
-une explication par `sourceDecisionId` ; l'explication n'est pas un souvenir et n'influence
-pas le monde.
+`DecisionExplanation` (déjà calculé en Phase 3C) reste **séparé** de l'événement : il contient le score de chaque action candidate, les facteurs dominants, l'état du PRNG au moment du choix, le tick et l'action retenue. Un événement pourra référencer une explication par `sourceDecisionId` ; l'explication n'est pas un souvenir et n'influence pas le monde.
+
+La Phase 3D **[Planifié]** précise l'identifiant stable `${worldId}:${tick}:${characterId}`
+et le contrat persistant `DecisionRecordV1` dans
+[DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md). Cet historique technique n'est pas
+le journal canonique décrit ici : il n'est pas une source de vérité narrative et ne génère
+aucun souvenir.
 
 ### 3.3 Historique : responsabilités
 
@@ -205,9 +214,9 @@ pour audit ; ils ne sont plus rappelés par le moteur.
 
 ## 7. Questions ouvertes
 
-- Faut-il stocker le `DecisionExplanation` en table dédiée ou dans `payload_json` de
-  l'événement ? Proposition : table dédiée si le volume devient élevé, sinon JSON ;
-  à arbitrer au moment de la phase 3.
+- **Résolu en Phase 3D** : le `DecisionExplanation` est stocké dans une table dédiée
+  `decision_records`, distincte du journal canonique de la Phase 5. Voir
+  [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md) §4.
 - Quelle profondeur de cascade et quel budget d'événements par tick ? À calibrer par
   simulation longue, pas par intuition.
 - Faut-il un « résumé de chapitre » périodique (journal agrégé) ? **[Planifié]** si l'UI
@@ -220,3 +229,4 @@ pour audit ; ils ne sont plus rappelés par le moteur.
 - `docs/RELATIONSHIP_SYSTEM.md` — événements à l'origine des changements de relation.
 - `docs/SIMULATION_TIME_AND_ENGINE.md` — tick, ordre, seed et reprise.
 - `docs/SIMULATION_ENGINE.md` — cycle de 16 étapes préexistant.
+- `docs/DECISION_HISTORY_SYSTEM.md` — historique technique des décisions (Phase 3D, planifié).

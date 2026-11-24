@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (tranche 3 intégration tick + persistance terminée, commitée et poussée).
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C documentée et validée, **tranches 1, 2 et 3 implémentées/validées** (contrats, catalogue, sept services purs, intégration au tick et persistance atomique du runtime). `forkFromStopped` reste `[Reporté]`.
+- **Phase** : **Phase 3D — Consolidation du moteur, conception documentaire terminée** ; Phase 3C reste la dernière tranche implémentée, commitée et poussée.
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C documentée et validée, **tranches 1, 2 et 3 implémentées/validées** ; Phase 3D **conçue et documentée, non implémentée** (historique, verrous/persistance, worker de calcul, IPC/UI). `forkFromStopped` reste `[Reporté]`.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant la tranche 3 : `7c426193331ff39e90acb7da26b06b1db8e8da7d` (`feat(phase3c): add pure decision and action services`), identique à `origin/main`, arbre propre.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant conception 3D : `276384eb993e91f80a309e0864a54dbe1fdf8d53`, identique à `origin/main`, arbre propre.
 
 ## Fonctionnalités terminées
 
@@ -83,7 +83,7 @@
 - [x] `src/shared/decision.ts` : motivations, objectifs immédiats, scores, explications complètes, contrat d'entrée du moteur de sélection.
 - [x] `src/shared/simulation-rules.ts` : extension additive (snapshot étendu, paramètres de décision versionnés, champs de résultat `decisions`/`actionDeltas`/`actionRuntimeStates`, cause `action_effect`) ; `current_goals_json` reste hors écriture.
 - [x] `src/main/services/simulation-parameters.service.ts` : paramètres de décision par défaut, poids explicitement identifiés comme hypothèses calibrables.
-- [x] `src/main/services/action-registry.service.ts` : catalogue statique des 11 actions, Tier A exécutables / Tier B désactivés, validation stricte, lookup et listes deterministes.
+- [x] `src/main/services/action-registry.service.ts` : catalogue statique des 11 actions, Tier A exécutables / Tier B désactivés, validation stricte, lookup et listes déterministes.
 - [x] `docs/AUTONOMOUS_DECISION_SYSTEM.md` §12.4 : recette technique précise de `forkFromStopped` (nouveau monde, nouvelles lignes, horloge/PRNG copiés, branche en pause, source intacte, transaction unique) ; **non implémenté**.
 - [x] `tests/action-registry.test.ts` : validation du registre, 11 identifiants, Tier B jamais disponible, `idle` sans effet, bornes de durée, absence d'effets non numériques, règle d'échec du sommeil.
 - [x] Validations : check-deps OK, typecheck 4 configs OK, tests **158/158 passés** (16 fichiers). Build non rejoué : aucun changement de bundle dans cette tranche de contrats.
@@ -99,7 +99,7 @@
 - [x] `src/main/services/action-execution.service.ts` : effets bornés par la marge, baseline des émotions négatives, multiplicateur de traits, quantification unique, `ActionEffectDelta`, règles d'échec `keep_partial` / `abort`, refus des actions Tier B et des effets non numériques.
 - [x] `src/shared/decision.ts` : `GoalSelectionInput`, `DecisionRng`, et second jeu de candidats `interruptionScored` pour rendre l'interruption réellement évaluable.
 - [x] `src/shared/simulation-rules.ts` : `AutonomousDecisionSnapshot.hour` ajouté (horloge logique, jamais `Date.now()`).
-- [x] `tests/phase3c-fixtures.ts` + 6 fichiers de test : **51 tests** couvrant chaque service (affamé, anxieux, sociable/indépendant, coûts, répétition, nuit, faisabilité, cooldown, départage PRNG rejeable, poursuite, interruption, échec, runtime corrompu, bornes d'effets).
+- [x] `tests/phase3c-fixtures.ts` + 6 fichiers de test : **51 tests** couvrant chaque service (affamé, anxieux, sociable/indépendant, coûts, répétition, nuit, faisabilité, cooldown, départage PRNG rejouable, poursuite, interruption, échec, runtime corrompu, bornes d'effets).
 - [x] `docs/AUTONOMOUS_DECISION_SYSTEM.md` : calibration `EMOTION_WEIGHT = 10` justifiée, découpe des sept services, rôle de `interruptionScored`, état d'implémentation tranche 2.
 - [x] Validations : check-deps OK, typecheck 4 configs OK, tests **209/209 passés** (22 fichiers), build OK. Aucun appel au tick : comportement Phase 3B inchangé.
 
@@ -114,12 +114,28 @@
 - [x] `tests/character-tick.test.ts` : trace PRNG vérifiée (`rngStateBefore`/`After`, chaînage des décisions, tirage conditionnel).
 - [x] Validations : check-deps OK, typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK.
 
+## Conception Phase 3D (documentaire, terminée dans cette tranche)
+
+- [x] Audit croisé et relecture du code réel : HEAD = `origin/main` = `276384e`, arbre propre avant modification ; services, worker planificateur, manager, schéma SQLite, IPC/preload et renderer vérifiés.
+- [x] Correction de l'audit précédent : worker de calcul dédié au lieu d'étendre le planificateur ; ordre historique → persistance/verrous → worker → UI ; aucune FK de l'historique vers `characters` ; restauration mémoire après échec de `persist()` ; façade stable pour le store.
+- [x] `docs/PHASE_3D_DESIGN.md` : architecture, quatre tranches détaillées (objectif, périmètre, fichiers, SQLite, contrats, dépendances, tests, acceptation, risques, exclusions), décisions techniques, garanties, croissance estimée, avis indépendant.
+- [x] `docs/DECISION_HISTORY_SYSTEM.md` : distinction avec le journal Phase 5, contrat `DecisionRecordV1`, table `decision_records`, validation stricte, migration additive, rétention sans purge, IPC de lecture, tests prévus.
+- [x] `docs/WORKER_TICK_PROTOCOL.md` : deux workers, protocole versionné, `requestId`, validation main, doublons/tardifs/timeout/recréation, Golden Hash.
+- [x] `docs/SAFE_PERSISTENCE.md` : export avant mutation, `temp + fsync + SHA-256 + rename`, restauration mémoire, verrou global ordonné, suppression de monde sérialisée, matrice d'échecs.
+- [x] `docs/WORLD_STORE_REFACTORING.md` : façade stable, neuf modules proposés, ordre d'extraction, exports publics et helpers de test conservés.
+- [x] `docs/DECISION_INSPECTOR_UI.md` : action courante, dernières actions, inspecteur, filtres bornés, throttle 500 ms, jeton de requête, états et tests.
+- [x] Mise à jour de `docs/DATABASE.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md` et `docs/EVENT_AND_MEMORY_SYSTEM.md` : correction des constats obsolètes et liens vers la Phase 3D.
+- [x] Audit indépendant des six documents intégré : contrat et payload d'historique alignés, verrous monde/global précisés, séquence de persistance corrigée, recréation du worker harmonisée, façade et exports du store vérifiés, `characterName` rendu stable, constats obsolètes et orthographe corrigés.
+- [x] Décisions ouvertes consignées dans `docs/PHASE_3D_DESIGN.md` §10 : rétention/archivage, export manuel, timeout worker 30 s et `engineVersion`.
+- [x] Aucun code applicatif, schéma SQLite, migration, IPC, preload, UI, worker, donnée utilisateur ni appel LLM modifié.
+
 ## Fonctionnalités non commencées
 
 - [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
 - [x] ~~Phase 3C : intégration des services au tick, persistance du runtime, tests SQLite et simulations longues~~ — **terminée (tranche 3)**.
-- [ ] Phase 3C complémentaire : table d'historique des actions, `forkFromStopped`, persistance intégrale des explications (tous `[Reporté]`).
-- [ ] Phases 4 à 8 : relations, événements, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
+- [ ] Phase 3D : implémentation des tranches 3D-A (historique), 3D-B (persistance/verrous), 3D-C (worker de calcul) et 3D-D (IPC/UI) — **conception terminée, en attente de validation explicite**.
+- [ ] Phase 3C complémentaire : `forkFromStopped`, hystérésis des objectifs, actions Tier B avec environnement (tous `[Reporté]`).
+- [ ] Phases 4 à 8 : relations, événements canoniques, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
 ## Conception Phase 2 (documentaire, terminée dans cette tranche)
 
@@ -209,6 +225,14 @@ Ajouts tranche implémentation Phase 3C — tranche 1 :
 Ajouts tranche implémentation Phase 3C — tranche 3 :
 - aucune nouvelle source ; modifications de `src/main/services/character-tick.service.ts`, `src/main/services/decision-engine.service.ts`, `src/main/services/world-store.service.ts`, `tests/simulation.test.ts`, `tests/simulation-long.test.ts`, `tests/character-tick.test.ts`.
 
+Ajouts tranche conception Phase 3D (documentaire uniquement) :
+- `docs/PHASE_3D_DESIGN.md`
+- `docs/DECISION_HISTORY_SYSTEM.md`
+- `docs/WORKER_TICK_PROTOCOL.md`
+- `docs/SAFE_PERSISTENCE.md`
+- `docs/WORLD_STORE_REFACTORING.md`
+- `docs/DECISION_INSPECTOR_UI.md`
+
 Ajouts tranche implémentation Phase 3C — tranche 2 :
 - `src/main/services/goal-selection.service.ts`
 - `src/main/services/action-candidacy.service.ts`
@@ -241,6 +265,7 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - Tranche implémentation Phase 3C — tranche 1 : `src/shared/simulation-rules.ts`, `src/main/services/simulation-parameters.service.ts`, `src/main/services/character-tick.service.ts` (retour vide des nouveaux tableaux), `docs/AUTONOMOUS_DECISION_SYSTEM.md` (§12.4), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 - Tranche implémentation Phase 3C — tranche 2 : `src/shared/decision.ts`, `src/shared/simulation-rules.ts`, `docs/AUTONOMOUS_DECISION_SYSTEM.md` (calibration, services, état), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`. Aucun appel à ces services depuis le tick.
 - Tranche implémentation Phase 3C — tranche 3 : `src/main/services/character-tick.service.ts`, `src/main/services/decision-engine.service.ts`, `src/main/services/world-store.service.ts`, `tests/simulation.test.ts`, `tests/simulation-long.test.ts`, `tests/character-tick.test.ts`, `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
+- Tranche conception Phase 3D (documentaire) : `docs/DATABASE.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/EVENT_AND_MEMORY_SYSTEM.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`. Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI ni appel LLM modifié.
 
 ## Tests réussis
 
@@ -255,6 +280,7 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - **Validation tranche implémentation Phase 3C — tranche 1** : check-deps OK, typecheck 4 configs OK, tests **158/158 passés** (16 fichiers). Aucun build rejoué : contrats purs uniquement, aucun bundle modifié. Audit Git avant tranche : HEAD local = `origin/main` = `c18e481`, arbre propre, `git fetch origin --dry-run` sans changement.
 - **Validation tranche implémentation Phase 3C — tranche 2** : check-deps OK, typecheck 4 configs OK, tests **209/209 passés** (22 fichiers, dont 51 tests des services purs), build OK. Audit Git avant tranche : HEAD local = `origin/main` = `033fced`, arbre propre. Aucun appel des services depuis le tick : comportement Phase 3B inchangé.
 - **Validation tranche implémentation Phase 3C — tranche 3** : check-deps OK (via build), typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK. Scénarios SQLite : runtime persistant, rejeu après réouverture, rollback intégral sur runtime corrompu, deux personnages, `current_goals_json` inchangé. Longs : 24/72/168/720/3000 ticks + 6 profils, anti-boucle et bornes vérifiés.
+- **Validation tranche conception Phase 3D (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK. Vérification croisée : 6 nouveaux documents, 4 documents techniques mis à jour, audit indépendant intégré, liens Markdown locaux valides, `git diff --check` OK, aucun fichier applicatif modifié.
 
 ## Tests échoués
 
@@ -277,4 +303,4 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 
 ## Prochaine tâche précise
 
-Finaliser la tranche Git de la tranche 2 (inspection diff, absence secrets/data, commit, push `origin/main` sans force, vérification hash distant et arbre propre). Ensuite : intégrer les sept services purs dans `character-tick.service.ts` (snapshot étendu, second jeu de candidats pour interruption, PRNG séquencé par identifiant, effets appliqués une seule fois), ajouter la colonne additive `current_action_json` et sa persistance transactionnelle dans `world-store.service.ts`, puis étendre les tests SQLite et les simulations longues. La politique `forkFromStopped` reste documentée et **non implémentée** tant que le produit ne l'a pas validée. Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.
+Attendre la validation explicite de la conception Phase 3D. Si elle est validée, commencer par la tranche **3D-A** : contrat `DecisionRecordV1`, table additive `decision_records`, écriture dans la transaction du tick, validation stricte et tests de rollback/migration ; ne pas toucher au worker, aux verrous ni à l'UI dans cette tranche. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.
