@@ -11,7 +11,7 @@ import type {
   CharacterActionRuntime,
   DecisionRule,
 } from '../../shared/action';
-import type { CharacterNeeds } from '../../shared/character';
+import type { CharacterNeeds, NeedKey } from '../../shared/character';
 import type { DecisionEngineInput, DecisionResult, ScoredCandidate } from '../../shared/decision';
 import { getActionDefinition } from './action-registry.service';
 import { assertBoundedValue } from './personality-influence.service';
@@ -101,6 +101,25 @@ export function findActionFailure(
   return null;
 }
 
+/**
+ * Besoin le plus urgent du tick. En cas d'égalité, l'ordre lexicographique
+ * garantit un choix indépendant de l'ordre des objets.
+ */
+export function mostUrgentNeed(goals: DecisionEngineInput['goals']): NeedKey {
+  const entries = Object.entries(goals.needUrgencies) as Array<[NeedKey, number]>;
+  entries.sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return entries[0][0];
+}
+
+/**
+ * Une interruption n'a de sens que si l'action de remplacement apporte un gain
+ * au besoin critique qui l'a déclenchée. Sans cette condition, un besoin non
+ * réparable (santé, hygiène sans environnement) provoquerait un churn sans fin.
+ */
+export function addressesNeed(actionId: ActionId, need: NeedKey): boolean {
+  return (getActionDefinition(actionId).satisfies[need] ?? 0) > 0;
+}
+
 /** Les quatre conditions cumulatives d'interruption du document ACTION_SYSTEM. */
 export function canInterruptActiveAction(
   definition: ActionDefinition,
@@ -141,26 +160,38 @@ export function decideAction(input: DecisionEngineInput): DecisionResult {
     const interruptionPool = [...(input.interruptionScored ?? input.scored)]
       .sort(compareActionId)
       .filter((candidate) => candidate.feasible);
+    // Une action à score non positif n'est pas une raison d'interrompre une
+    // action en cours : l'interruption doit avoir une utilité démontrable.
     const alternatives = interruptionPool.filter(
-      (candidate) => candidate.actionId !== 'idle' && candidate.actionId !== active.actionId,
+      (candidate) => candidate.actionId !== 'idle'
+        && candidate.actionId !== active.actionId
+        && candidate.score > 0,
     );
     if (failure) {
       selectedActionId = active.actionId;
       selectionRule = 'action_failed';
       reason = failure.reason;
-    } else if (canInterruptActiveAction(definition, input, alternatives)) {
-      const best = selectBest(alternatives, input);
-      selectedActionId = best.actionId;
-      selectionRule = 'interruption';
-      reason = `interruption de ${active.actionId} après ${input.tick - active.startedTick} ticks ; ${best.reason}`;
-      rngDraws = best.rngDraws;
     } else {
-      selectedActionId = active.actionId;
-      selectionRule = 'continue_active';
-      reason = `action longue ${active.actionId} poursuivie jusqu'au tick ${active.endsAtTick} (aucune interruption validée)`;
+      const urgentNeed = mostUrgentNeed(input.goals);
+      const relevant = alternatives.filter((candidate) => addressesNeed(candidate.actionId, urgentNeed));
+      if (relevant.length > 0 && canInterruptActiveAction(definition, input, relevant)) {
+        const best = selectBest(relevant, input);
+        selectedActionId = best.actionId;
+        selectionRule = 'interruption';
+        reason = `interruption de ${active.actionId} après ${input.tick - active.startedTick} ticks ; ${best.reason}`;
+        rngDraws = best.rngDraws;
+      } else {
+        selectedActionId = active.actionId;
+        selectionRule = 'continue_active';
+        reason = `action longue ${active.actionId} poursuivie jusqu'au tick ${active.endsAtTick} (aucune interruption utile)`;
+      }
     }
   } else {
-    const alternatives = feasible.filter((candidate) => candidate.actionId !== 'idle');
+    // Sans gain net (score <= 0), aucune action ne justifie de quitter `idle` :
+    // cela évite l'agitation artificielle quand tous les besoins sont couverts.
+    const alternatives = feasible.filter(
+      (candidate) => candidate.actionId !== 'idle' && candidate.score > 0,
+    );
     if (alternatives.length === 0) {
       selectedActionId = 'idle';
       selectionRule = 'forced_idle';

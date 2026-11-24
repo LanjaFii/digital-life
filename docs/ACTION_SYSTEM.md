@@ -1,9 +1,9 @@
 # Système d'actions autonomes — conception Phase 3C
 
-> **Statut : proposition architecturale. Aucune action, aucun catalogue, aucune machine
-> à états d'action et aucune conséquence d'action n'est implémenté dans cette tranche.**
-> Cette tranche est **strictement documentaire** : aucun code applicatif, aucun schéma
-> SQLite, aucune migration, aucune IPC, aucun renderer ni appel LLM n'a été modifié.
+> **Statut : implémenté (tranche 3).** Catalogue versionné, machine à états, effets
+> numériques et persistance atomique du runtime sont branchés sur le tick. Aucune IPC,
+> aucun renderer, aucun worker ni appel LLM n'est modifié. Le document ci-dessous
+> conserve l'audit et la conception d'origine.
 > Source de vérité de l'existant : `src/shared/character.ts`, `src/shared/simulation-rules.ts`,
 > `src/main/services/character-tick.service.ts`, `src/main/services/world-store.service.ts`,
 > `docs/CHARACTER_TICK_RULES.md`.

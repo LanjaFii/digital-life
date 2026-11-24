@@ -29,11 +29,16 @@ import {
   type SimulationSpeed,
   type SimulationStatusView,
 } from '../../shared/simulation';
+import {
+  DEFAULT_CHARACTER_ACTION_RUNTIME_JSON,
+  type CharacterActionRuntime,
+} from '../../shared/action';
 import type { CharacterTickSnapshot } from '../../shared/simulation-rules';
 import { computeCharacterTick } from './character-tick.service';
 import { generateCharactersForWorld } from './character-generator.service';
 import { validateCharacterDraft } from './character-validation.service';
 import { getWasmPath } from './resource.service';
+import { parseActionRuntime, serializeActionRuntime } from './action-runtime.service';
 import { DEFAULT_SIMULATION_PARAMETERS } from './simulation-parameters.service';
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
@@ -104,6 +109,7 @@ function ensureSchema(db: Database): void {
       current_emotions_json TEXT,
       current_needs_json TEXT,
       current_goals_json TEXT,
+      current_action_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (world_id) REFERENCES worlds(id) ON DELETE CASCADE
@@ -171,8 +177,10 @@ function ensureSchema(db: Database): void {
   addCharCol('current_emotions_json', 'current_emotions_json TEXT');
   addCharCol('current_needs_json', 'current_needs_json TEXT');
   addCharCol('current_goals_json', 'current_goals_json TEXT');
+  addCharCol('current_action_json', 'current_action_json TEXT');
 
   // Backfill instances existantes : initial/current = valeurs existantes.
+  // Le runtime d'action reçoit explicitement sa valeur par défaut versionnée.
   db.run(`
     UPDATE characters
     SET
@@ -184,11 +192,13 @@ function ensureSchema(db: Database): void {
       current_traits_json = COALESCE(current_traits_json, traits_json),
       current_emotions_json = COALESCE(current_emotions_json, emotions_json),
       current_needs_json = COALESCE(current_needs_json, needs_json),
-      current_goals_json = COALESCE(current_goals_json, goals_json)
+      current_goals_json = COALESCE(current_goals_json, goals_json),
+      current_action_json = COALESCE(current_action_json, '${DEFAULT_CHARACTER_ACTION_RUNTIME_JSON}')
     WHERE
       updated_at IS NULL OR
       initial_traits_json IS NULL OR initial_emotions_json IS NULL OR initial_needs_json IS NULL OR initial_goals_json IS NULL OR
-      current_traits_json IS NULL OR current_emotions_json IS NULL OR current_needs_json IS NULL OR current_goals_json IS NULL
+      current_traits_json IS NULL OR current_emotions_json IS NULL OR current_needs_json IS NULL OR current_goals_json IS NULL OR
+      current_action_json IS NULL
   `);
 
   // Index sur template_id créé après migration additive (bases existantes sans la colonne).
@@ -269,8 +279,8 @@ function insertCharacters(db: Database, characters: CharacterInstance[]): void {
       traits_json, emotions_json, needs_json, goals_json,
       initial_traits_json, initial_emotions_json, initial_needs_json, initial_goals_json,
       current_traits_json, current_emotions_json, current_needs_json, current_goals_json,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      current_action_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const c of characters) {
     stmt.run([
@@ -294,6 +304,7 @@ function insertCharacters(db: Database, characters: CharacterInstance[]): void {
       JSON.stringify(c.currentState.emotions),
       JSON.stringify(c.currentState.needs),
       JSON.stringify(c.currentState.goals),
+      DEFAULT_CHARACTER_ACTION_RUNTIME_JSON,
       c.createdAt,
       c.updatedAt,
     ]);
@@ -756,6 +767,41 @@ export async function _resetWorldStoreForTests(): Promise<void> {
   sqlPromise = null;
 }
 
+/** Test : lit les colonnes JSON brutes d'un personnage (audit Phase 3C). */
+export async function _getCharacterJsonColumnsForTests(
+  worldId: string,
+  characterId: string,
+): Promise<{ currentActionJson: string | null; currentGoalsJson: string | null }> {
+  const db = await getDb();
+  const stmt = db.prepare(
+    'SELECT current_action_json, current_goals_json FROM characters WHERE id = ? AND world_id = ?',
+  );
+  stmt.bind([characterId, assertValidWorldId(worldId)]);
+  if (!stmt.step()) {
+    stmt.free();
+    throw new Error('Personnage introuvable dans ce monde.');
+  }
+  const row = stmt.getAsObject();
+  stmt.free();
+  return {
+    currentActionJson: row.current_action_json === null ? null : String(row.current_action_json),
+    currentGoalsJson: row.current_goals_json === null ? null : String(row.current_goals_json),
+  };
+}
+
+/** Test : injecte un runtime corrompu pour vérifier le rollback complet. */
+export async function _setCharacterActionJsonForTests(
+  worldId: string,
+  characterId: string,
+  value: string,
+): Promise<void> {
+  const db = await getDb();
+  const stmt = db.prepare('UPDATE characters SET current_action_json = ? WHERE id = ? AND world_id = ?');
+  stmt.run([value, characterId, assertValidWorldId(worldId)]);
+  stmt.free();
+  persist(db);
+}
+
 function assertValidWorldId(worldId: string): string {
   const id = typeof worldId === 'string' ? worldId.trim() : '';
   if (!id) throw new Error('Identifiant de monde invalide.');
@@ -1051,13 +1097,22 @@ export async function setSimulationSpeed(worldId: string, speed: unknown): Promi
   }
 }
 
-/** Charge les personnages du monde dans la transaction courante. */
-function loadTickSnapshots(db: Database, worldId: string): CharacterTickSnapshot[] {
+/**
+ * Charge les personnages et leur runtime d'action dans la transaction courante.
+ * Un runtime corrompu lève ici une erreur technique : le tick est rollbacké.
+ */
+function loadTickSnapshots(
+  db: Database,
+  worldId: string,
+): { snapshots: CharacterTickSnapshot[]; actionRuntimeByCharacter: Record<string, CharacterActionRuntime> } {
   const stmt = db.prepare('SELECT * FROM characters WHERE world_id = ? ORDER BY id ASC');
   stmt.bind([worldId]);
   const snapshots: CharacterTickSnapshot[] = [];
+  const actionRuntimeByCharacter: Record<string, CharacterActionRuntime> = {};
   while (stmt.step()) {
-    const character = rowToCharacter(stmt.getAsObject());
+    const row = stmt.getAsObject();
+    const character = rowToCharacter(row);
+    actionRuntimeByCharacter[character.id] = parseActionRuntime(row.current_action_json);
     snapshots.push({
       characterId: character.id,
       traits: character.currentState.traits,
@@ -1067,35 +1122,49 @@ function loadTickSnapshots(db: Database, worldId: string): CharacterTickSnapshot
     });
   }
   stmt.free();
-  return snapshots;
+  return { snapshots, actionRuntimeByCharacter };
 }
 
 /** Écrit les états calculés dans la transaction courante, en ordre déterministe. */
 function writeTickCharacterStates(
   db: Database,
-  states: Array<{ characterId: string; needs: CharacterNeeds; emotions: CharacterEmotions }>,
+  states: Array<{
+    characterId: string;
+    needs: CharacterNeeds;
+    emotions: CharacterEmotions;
+    runtime: CharacterActionRuntime;
+  }>,
   updatedAt: string,
 ): void {
   const sorted = [...states].sort((a, b) => (a.characterId < b.characterId ? -1 : a.characterId > b.characterId ? 1 : 0));
   const stmt = db.prepare(`
     UPDATE characters
     SET emotions_json=?, needs_json=?,
-        current_emotions_json=?, current_needs_json=?,
+        current_emotions_json=?, current_needs_json=?, current_action_json=?,
         updated_at=?
     WHERE id=?
   `);
   for (const state of sorted) {
     const emotionsJson = JSON.stringify(state.emotions);
     const needsJson = JSON.stringify(state.needs);
-    stmt.run([emotionsJson, needsJson, emotionsJson, needsJson, updatedAt, state.characterId]);
+    stmt.run([
+      emotionsJson,
+      needsJson,
+      emotionsJson,
+      needsJson,
+      serializeActionRuntime(state.runtime),
+      updatedAt,
+      state.characterId,
+    ]);
   }
   stmt.free();
 }
 
 /**
- * Applique exactement un tick : évolution passive des besoins/émotions et
- * avance de l'horloge dans une seule transaction SQLite et un seul `persist`.
- * Le PRNG n'est pas consommé (Phase 3B). Aucun effet partiel en cas d'erreur.
+ * Applique exactement un tick : évolution passive, décisions autonomes, effets
+ * d'action, runtime et avance de l'horloge dans une seule transaction SQLite et
+ * un seul `persist`. Le PRNG n'est consommé qu'en cas d'ex æquo réel. Aucun
+ * effet partiel en cas d'erreur.
  */
 export async function stepSimulation(worldId: string): Promise<SimulationStatusView> {
   const id = assertValidWorldId(worldId);
@@ -1114,7 +1183,7 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
     const clockRow = getSimulationClockRow(db, id);
     if (!clockRow) throw new Error('Horloge de simulation introuvable pendant le tick.');
     const prev = clockRowToClock(clockRow);
-    const snapshots = loadTickSnapshots(db, id);
+    const { snapshots, actionRuntimeByCharacter } = loadTickSnapshots(db, id);
     const nextTick = prev.tick + 1;
     const { day, hour } = deriveDayHour(nextTick);
 
@@ -1128,10 +1197,21 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
       rngState: prev.rngState,
       characters: snapshots,
       params: DEFAULT_SIMULATION_PARAMETERS,
+      actionRuntimeByCharacter,
+    });
+
+    const runtimes = new Map(result.actionRuntimeStates.map((entry) => [entry.characterId, entry.runtime]));
+    if (runtimes.size !== result.characterStates.length) {
+      throw new Error('Nombre de runtimes d’action incohérent avec les états calculés.');
+    }
+    const states = result.characterStates.map((state) => {
+      const runtime = runtimes.get(state.characterId);
+      if (!runtime) throw new Error(`Runtime d’action manquant pour ${state.characterId}.`);
+      return { ...state, runtime };
     });
 
     const now = new Date().toISOString();
-    writeTickCharacterStates(db, result.characterStates, now);
+    writeTickCharacterStates(db, states, now);
 
     if (tickFailureForTests) tickFailureForTests();
 
@@ -1142,7 +1222,7 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
       hour,
       // step en pause conserve la pause ; step en running conserve running
       status: prev.status,
-      // Aucune règle ne consomme le PRNG en Phase 3B : état strictement conservé.
+      // État exact après au plus un tirage par personnage (ex æquo uniquement).
       rngState: result.rngState >>> 0,
       lastProcessedOrder: 0,
       updatedAt: now,

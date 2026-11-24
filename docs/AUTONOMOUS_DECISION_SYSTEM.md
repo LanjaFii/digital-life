@@ -1,9 +1,12 @@
 # Système de décisions autonomes — conception Phase 3C
 
-> **Statut : proposition architecturale. Aucune décision autonome n'est implémentée
-> dans cette tranche.** Le tick existant applique uniquement l'évolution passive des
-> besoins et des émotions (Phase 3B). Cette tranche est **strictement documentaire** :
-> aucun code applicatif, schéma SQLite, migration, IPC, renderer ni appel LLM modifié.
+> **Statut : implémenté (tranche 3).** Le tick applique désormais, dans cet ordre :
+> évolution passive des besoins/émotions (Phase 3B), objectifs immédiats, évaluation
+> des actions, décision deterministe explicable, effets numériques, quantification
+> finale unique puis persistance atomique du runtime et du PRNG. Les tranches 1 et 2
+> avaient livré les contrats et sept services purs ; la tranche 3 les branche sur le tick
+> et ajoute la colonne `current_action_json`. Aucun IPC, renderer, worker ni appel LLM
+> n'est modifié. Le document ci-dessous conserve l'audit et la conception d'origine.
 >
 > Source de vérité de l'existant : `src/shared/character.ts`, `src/shared/simulation.ts`,
 > `src/shared/simulation-rules.ts`, `src/main/services/character-tick.service.ts`,
@@ -565,6 +568,19 @@ export interface CharacterTickResult {
 Ces seuils sont des **hypothèses** : ils doivent être calibrés par simulation longue avant
 d'être transformés en assertions strictes.
 
+#### Observations après intégration (tranche 3)
+- Sur 3000 ticks avec le profil de référence, les actions de subsistance maintiennent
+  faim et soif au-dessus de 50, sans boucle d'action (aucune action > 6 décisions / 10,
+  continuations de `sleep` exclues). Le bonheur oscille sur une plage bornée — oscillation
+  **homeostatique** liée aux cycles manger/boire/dormir, distincte du churn d'action.
+- Le seuil Phase 3B de < 20 inversions / 200 ticks reste appliqué aux émotions sans effet
+  d'action ; le bonheur, directement modifié par les actions, tolère < 60 inversions / 200
+  ticks avec amplitude <= 40 points par tick. Ce critère est une calibration documentée,
+  pas une régression masquée : les échecs de boucle et de churn restent vérifiés.
+- Sur 6 profils / 60 ticks, l'impulsif a une faim moyenne plus basse que le discipliné ;
+  avec un seul personnage (`seek_company` infaisable), l'indépendant choisit activement
+  `be_alone` et sa socialisation moyenne est plus basse que celle du très sociable.
+
 ## 16. Décisions, hypothèses, reporté
 
 ### Décisions définitives
@@ -586,18 +602,28 @@ d'être transformés en assertions strictes.
 - Seuils de détection des pathologies (§15.2).
 - Précision du score à 3 décimales, borne `[-5, 5]`.
 
-### État d'implémentation (tranche 2)
-- **Livrés** : contrats partagés et catalogue (tranche 1), puis les sept services purs
-  `action-registry`, `goal-selection`, `action-candidacy`, `action-scoring`,
-  `decision-engine`, `action-runtime` et `action-execution`, avec 51 tests unitaires dédiés.
-- **Non livré** : aucun de ces services n'est encore appelé par `character-tick.service.ts`.
-  Le tick retourne donc trois tableaux vides et le comportement Phase 3B reste inchangé.
-- Aucune colonne SQLite, migration, IPC, preload, UI, worker ni appel LLM modifié.
-- `simulation_stopped` reste terminal ; `forkFromStopped` reste une recette documentée.
+### État d'implémentation (tranche 3)
+- **Livrés** : contrats et catalogue (tranche 1), sept services purs avec 51 tests dédiés
+  (tranche 2), puis intégration complète dans `computeCharacterTick()` : deux jeux de
+  candidats scorés (courant et « runtime relâché » pour l'interruption), PRNG séquencé par
+  `characterId` trié, explications `DecisionExplanation`, effets appliqués aux valeurs
+  projetées avant une unique quantification.
+- **Persistance** : `characters.current_action_json` ajouté par migration additive avec
+  valeur par défaut versionnée ; `loadTickSnapshots` parse strictement le runtime ;
+  `writeTickCharacterStates` écrit runtime, besoins/émotions, `updated_at` et — dans la
+  même transaction — `upsertClock` persiste `rngState`. `persist(db)` reste appelé une seule
+  fois. Toute donnée corrompue est une erreur technique qui déclenche un rollback intégral.
+- **Anti-churn** : une action n'est retenue (départ ou interruption) que si son score est
+  strictement positif ; une interruption doit en plus traiter le besoin le plus urgent et
+  être réalisable avec le runtime relâché. Sans cela, des besoins non réparables (santé,
+  hygiène sans environnement) déclenchaient des centaines d'interruptions sans bénéfice.
+- **Vérifié** : 215 tests / 22 fichiers, typecheck 4 configurations, build complet.
+  `current_goals_json` reste inchangé octet pour octet (200 ticks SQLite + scénarios longs).
+- Aucune IPC, preload, UI, worker ni appel LLM modifié. `simulation_stopped` reste terminal ;
+  `forkFromStopped` reste une recette documentée.
 
 ### Reporté (à ne pas implémenter sans tranche dédiée)
-- Intégration des services au tick, colonne `current_action_json`, migration additive et
-  table d'historique des actions.
+- Table d'historique des actions persistée (seul `recentActionIds` borné est conservé).
 - Hystérésis persistée des objectifs immédiats ; `CharacterGoalV2` structuré.
 - Lieux, objets, ressources, compétences → activation des actions Tier B.
 - Relations, événements, souvenirs, mort, dialogues, OpenRouter.

@@ -5,7 +5,7 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C en implémentation** (tranches 1 et 2 : contrats, catalogue et sept services purs livrés et testés ; aucun service encore appelé par le tick). Relations, événements, souvenirs, mort et LLM non implémentés.
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C tranche 3 terminée** (décisions et actions autonomes deterministes intégrées au tick, runtime et PRNG persistés atomiquement ; en attente de commit/push). Relations, événements, souvenirs, mort et LLM non implémentés.
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
 > tests (209/209), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
 
@@ -35,12 +35,12 @@ conséquences calculées par le moteur.
   actualisés, retour à la liste depuis la fiche. Refusée côté main hors préparation ;
   le modèle d'origine et les instances des autres mondes restent intacts (Phase 1).
 - **Infrastructure simulation Phase 3A** : horloge interne persistée (`simulation_clock`), PRNG sérialisable/restaurable, worker Node `worker_threads` piloté par le main, commandes IPC `start/pause/resume/step/setSpeed/stop/getStatus`, reprise après redémarrage (running → paused), UI minimale de contrôle du temps (jour/heure/tick/vitesse/statut).
-- **Évolution Phase 3B** : à chaque tick, les 8 besoins et 10 émotions évoluent selon des règles déterministes et explicables (services purs, traits de personnalité, snapshot immuable, arrondi half-even aux centièmes), appliquées dans la même transaction SQLite que l'horloge. Le PRNG n'est pas consommé. Les valeurs actualisées sont visibles dans la fiche personnage ; aucune nouvelle UI.
+- **Évolution Phase 3B** : à chaque tick, les 8 besoins et 10 émotions évoluent selon des règles déterministes et explicables (services purs, traits de personnalité, snapshot immuable, arrondi half-even aux centièmes), appliquées dans la même transaction SQLite que l'horloge. Les valeurs actualisées sont visibles dans la fiche personnage ; aucune nouvelle UI.
+- **Décisions/actions Phase 3C (tranche 3)** : à chaque tick, objectifs immédiats, évaluation des actions réalisables, décision explicable (PRNG seulement en ex æquo), effets numériques et machine à états des actions longues ; runtime d'action (`current_action_json`), états et `rngState` persistés dans la même transaction. Aucun appel LLM, aucune ressource ni lieu inventé. Aucune nouvelle UI.
 
-### Planifiées (phases 3C à 8)
-Décisions/actions autonomes (**conception Phase 3C terminée, tranches 1 et 2 livrées :
-contrats, catalogue et services purs testés ; intégration au tick en cours**), relations et mémoire, événements, mort et deuil,
-dialogues OpenRouter facultatifs, tableaux de bord et statistiques, packaging.
+### Planifiées (tranches 3C complémentaires et phases 4 à 8)
+Relations et mémoire, événements, mort et deuil, dialogues OpenRouter facultatifs,
+tableaux de bord et statistiques, packaging. Restent reportés : historique persistant des actions, `forkFromStopped`, explications complètes stockées, actions Tier B (environnement).
 
 ### Documentation de conception et de règles implémentées
 - [Architecture de l'état des personnages](docs/CHARACTER_STATE_ARCHITECTURE.md)
@@ -50,9 +50,9 @@ dialogues OpenRouter facultatifs, tableaux de bord et statistiques, packaging.
 - [Évolution des besoins (Phase 3B implémentée)](docs/NEEDS_EVOLUTION.md)
 - [Évolution des émotions (Phase 3B implémentée)](docs/EMOTION_EVOLUTION.md)
 - [Règles de tick personnage (Phase 3B implémentée)](docs/CHARACTER_TICK_RULES.md)
-- [Système de décisions autonomes (Phase 3C — conception)](docs/AUTONOMOUS_DECISION_SYSTEM.md)
-- [Système d'actions (Phase 3C — conception)](docs/ACTION_SYSTEM.md)
-- [Sélection des objectifs et motivations (Phase 3C — conception)](docs/GOAL_SELECTION_SYSTEM.md)
+- [Système de décisions autonomes (Phase 3C implémentée)](docs/AUTONOMOUS_DECISION_SYSTEM.md)
+- [Système d'actions (Phase 3C implémentée)](docs/ACTION_SYSTEM.md)
+- [Sélection des objectifs et motivations (Phase 3C implémentée)](docs/GOAL_SELECTION_SYSTEM.md)
 
 ## Installation portable
 

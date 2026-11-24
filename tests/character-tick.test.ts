@@ -18,7 +18,7 @@ function input(characters: ReturnType<typeof makeSnapshot>[], overrides: Partial
   };
 }
 
-describe('orchestration du tick personnage (Phase 3B)', () => {
+describe('orchestration du tick personnage (Phase 3B + décisions 3C)', () => {
   it('trie les personnages par identifiant de façon stable', () => {
     const ordered = orderSnapshots([
       makeSnapshot({ characterId: 'c' }),
@@ -36,9 +36,18 @@ describe('orchestration du tick personnage (Phase 3B)', () => {
     expect(forward).toEqual(reverse);
   });
 
-  it('conserve strictement le PRNG et n’expose aucun effet SQLite', () => {
-    const result = computeCharacterTick(input([makeSnapshot()]));
-    expect(result.rngState).toBe(0xdeadbeef);
+  it('ne consomme le PRNG que sur un ex æquo réel et n’expose aucun effet SQLite', () => {
+    const initial = input([makeSnapshot()]);
+    const result = computeCharacterTick(initial);
+    const draws = result.decisions.reduce((sum, decision) => sum + decision.rngDraws, 0);
+    expect(draws).toBeLessThanOrEqual(result.decisions.length);
+    expect(result.decisions[0].rngStateBefore).toBe(initial.rngState);
+    expect(result.decisions.at(-1)?.rngStateAfter).toBe(result.rngState);
+    for (let i = 1; i < result.decisions.length; i++) {
+      expect(result.decisions[i].rngStateBefore).toBe(result.decisions[i - 1].rngStateAfter);
+    }
+    if (draws === 0) expect(result.rngState).toBe(initial.rngState);
+    else expect(result.rngState).not.toBe(initial.rngState);
     expect(result.worldId).toBe('world-1');
     expect(result.tick).toBe(1);
   });

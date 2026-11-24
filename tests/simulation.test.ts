@@ -21,7 +21,9 @@ vi.mock('../src/main/services/resource.service', () => ({
 }));
 
 import {
+  _getCharacterJsonColumnsForTests,
   _resetWorldStoreForTests,
+  _setCharacterActionJsonForTests,
   _setTickFailureForTests,
   createWorld,
   getSimulationStatus,
@@ -36,6 +38,8 @@ import {
   stopSimulation,
 } from '../src/main/services/world-store.service';
 import { createCharacterInWorld } from '../src/main/services/world-store.service';
+import { parseActionRuntime } from '../src/main/services/action-runtime.service';
+import type { CharacterInstance } from '../src/shared/character';
 
 function clearDb() {
   rmSync(tmp, { recursive: true, force: true });
@@ -257,5 +261,157 @@ describe('Tick Phase 3B — intégration SQLite', () => {
       expect(value).toBeGreaterThanOrEqual(0);
       expect(value).toBeLessThanOrEqual(100);
     }
+  });
+});
+
+/** Fabrique un monde contrôlé (un personnage, valeurs connues) pour la Phase 3C. */
+async function createPhase3CWorld(
+  needs: Partial<CharacterInstance['currentState']['needs']> = {},
+  seed = 42,
+  characterCount = 1,
+) {
+  const world = await createWorld({ name: 'Phase3C', generationMode: 'empty', seed });
+  const traits = {
+    sociability:50, empathy:50, aggression:50, patience:50, impulsivity:50, curiosity:50,
+    intelligence:50, creativity:50, honesty:50, altruism:50, ambition:50, courage:50,
+    timidity:50, distrust:50, optimism:50, humor:50, jealousy:50, discipline:50,
+    independence:50, loyalty:50, resilience:50,
+  };
+  const emotions = {
+    happiness:60, sadness:20, stress:30, anxiety:25, anger:20,
+    fear:20, confidence:55, loneliness:20, motivation:60, satisfaction:60,
+  };
+  const baseNeeds = {
+    hunger:80, thirst:80, energy:80, sleep:80,
+    health:90, hygiene:80, socialization:80, safety:80,
+  };
+  const created: CharacterInstance[] = [];
+  for (let index = 0; index < characterCount; index++) {
+    const result = await createCharacterInWorld({
+      worldId: world.id,
+      firstName: `P${index}`,
+      lastName: 'Test',
+      age: 20 + index,
+      gender: 'female',
+      biography: 'bio',
+      traits,
+      emotions,
+      needs: { ...baseNeeds, ...needs },
+      goals: [
+        { id: 'p', label: 'P', kind: 'primary' },
+        { id: 's1', label: 'S1', kind: 'secondary' },
+        { id: 's2', label: 'S2', kind: 'secondary' },
+      ],
+    });
+    created.push(result.character);
+  }
+  await startSimulation(world.id, 1);
+  return { world, characters: created };
+}
+
+describe('Tick Phase 3C — intégration SQLite', () => {
+  it('un besoin critique déclenche une action et persiste le runtime dans la transaction', async () => {
+    const { world, characters } = await createPhase3CWorld({ thirst: 5 });
+    const goalsBefore = await _getCharacterJsonColumnsForTests(world.id, characters[0].id);
+    await stepSimulation(world.id);
+
+    const updated = (await listCharacters(world.id)).characters[0];
+    expect(updated.currentState.needs.thirst).toBeGreaterThan(5);
+    const persisted = await _getCharacterJsonColumnsForTests(world.id, characters[0].id);
+    const runtime = parseActionRuntime(persisted.currentActionJson);
+    expect(runtime.version).toBe(1);
+    expect(runtime.lastDecision?.actionId).toBe('drink');
+    expect(runtime.recentActionIds).toContain('drink');
+    expect(runtime.cooldowns.drink).toBeGreaterThan(1);
+    expect(goalsBefore.currentGoalsJson).toBe(persisted.currentGoalsJson);
+  });
+
+  it('une action longue reste active sur les ticks suivants et avance sa fenêtre', async () => {
+    const { world, characters } = await createPhase3CWorld({ sleep: 5, energy: 20 });
+    await stepSimulation(world.id);
+    const first = parseActionRuntime((await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentActionJson);
+    expect(first.active?.actionId).toBe('sleep');
+    expect(first.active?.endsAtTick).toBeGreaterThan(first.active!.startedTick);
+
+    await stepSimulation(world.id);
+    const second = parseActionRuntime((await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentActionJson);
+    expect(second.active?.actionId).toBe('sleep');
+    expect(second.active?.lastAppliedTick).toBe(2);
+  });
+
+  it('le rejeu après fermeture/réouverture donne les mêmes états, décisions et PRNG', async () => {
+    const a = await createPhase3CWorld({ hunger: 15, sleep: 20 }, 7);
+    for (let i = 0; i < 6; i++) await stepSimulation(a.world.id);
+    const beforeClock = (await getSimulationStatus(a.world.id)).clock!;
+    const beforeCharacter = (await listCharacters(a.world.id)).characters[0];
+    const beforeRuntime = await _getCharacterJsonColumnsForTests(a.world.id, a.characters[0].id);
+
+    await _resetWorldStoreForTests();
+    const afterClock = (await getSimulationStatus(a.world.id)).clock!;
+    const afterCharacter = (await listCharacters(a.world.id)).characters[0];
+    const afterRuntime = await _getCharacterJsonColumnsForTests(a.world.id, a.characters[0].id);
+    expect(afterClock).toEqual(beforeClock);
+    expect(afterCharacter.currentState).toEqual(beforeCharacter.currentState);
+    expect(afterRuntime).toEqual(beforeRuntime);
+
+    const b = await createPhase3CWorld({ hunger: 15, sleep: 20 }, 7);
+    for (let i = 0; i < 6; i++) await stepSimulation(b.world.id);
+    const replayClock = (await getSimulationStatus(b.world.id)).clock!;
+    expect({
+      tick: replayClock.tick, day: replayClock.day, hour: replayClock.hour,
+      rngState: replayClock.rngState, speed: replayClock.speed, status: replayClock.status,
+    }).toEqual({
+      tick: beforeClock.tick, day: beforeClock.day, hour: beforeClock.hour,
+      rngState: beforeClock.rngState, speed: beforeClock.speed, status: beforeClock.status,
+    });
+    expect((await listCharacters(b.world.id)).characters[0].currentState).toEqual(beforeCharacter.currentState);
+    expect(await _getCharacterJsonColumnsForTests(b.world.id, b.characters[0].id)).toEqual(beforeRuntime);
+  });
+
+  it('un runtime corrompu est une erreur technique avec rollback intégral', async () => {
+    const { world, characters } = await createPhase3CWorld({ thirst: 10 });
+    await stepSimulation(world.id);
+    const beforeClock = (await getSimulationStatus(world.id)).clock!;
+    const beforeCharacter = (await listCharacters(world.id)).characters[0];
+    const goalsBefore = (await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentGoalsJson;
+    await _setCharacterActionJsonForTests(world.id, characters[0].id, '{"version":99}');
+
+    await expect(stepSimulation(world.id)).rejects.toThrow(/Version de runtime/);
+    const afterClock = (await getSimulationStatus(world.id)).clock!;
+    expect(afterClock.tick).toBe(beforeClock.tick);
+    expect(afterClock.rngState).toBe(beforeClock.rngState);
+    const afterCharacter = (await listCharacters(world.id)).characters[0];
+    expect(afterCharacter.currentState.needs).toEqual(beforeCharacter.currentState.needs);
+    expect(afterCharacter.currentState.emotions).toEqual(beforeCharacter.currentState.emotions);
+    expect((await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentGoalsJson)
+      .toBe(goalsBefore);
+  });
+
+  it('plusieurs personnages reçoivent chacun un runtime valide et cohérent', async () => {
+    const { world, characters } = await createPhase3CWorld({ hunger: 10 }, 11, 2);
+    const goalsBefore = await Promise.all(
+      characters.map((c) => _getCharacterJsonColumnsForTests(world.id, c.id)),
+    );
+    for (let i = 0; i < 4; i++) await stepSimulation(world.id);
+    expect((await getSimulationStatus(world.id)).clock?.tick).toBe(4);
+
+    const states = (await listCharacters(world.id)).characters;
+    expect(states).toHaveLength(2);
+    for (let index = 0; index < characters.length; index++) {
+      const persisted = await _getCharacterJsonColumnsForTests(world.id, characters[index].id);
+      const runtime = parseActionRuntime(persisted.currentActionJson);
+      expect(runtime.version).toBe(1);
+      expect(runtime.recentActionIds.length).toBeGreaterThan(0);
+      expect(persisted.currentGoalsJson).toBe(goalsBefore[index].currentGoalsJson);
+    }
+  });
+
+  it('current_goals_json reste inchangé octet pour octet sur une longue simulation', async () => {
+    const { world, characters } = await createPhase3CWorld({ hunger: 40, sleep: 40 }, 3);
+    const before = (await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentGoalsJson;
+    for (let i = 0; i < 200; i++) await stepSimulation(world.id);
+    const after = (await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentGoalsJson;
+    expect(after).toBe(before);
+    expect((await getSimulationStatus(world.id)).clock?.tick).toBe(200);
   });
 });

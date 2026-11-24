@@ -1,8 +1,9 @@
 # Sélection des objectifs et des motivations — conception Phase 3C
 
-> **Statut : proposition architecturale. Aucun objectif immédiat, aucune motivation ni
-> aucune modification d'objectif n'est implémenté dans cette tranche.** Tranche strictement
-> documentaire : aucun code applicatif, schéma SQLite, IPC, UI ou LLM modifié.
+> **Statut : implémenté (tranche 3).** Les objectifs immédiats et les motivations sont
+> calculés à chaque tick, sans jamais écrire `current_goals_json` ni interpréter `label`.
+> Aucune IPC, UI ni LLM modifié. Le document ci-dessous conserve l'audit et la conception
+> d'origine.
 > Source de vérité de l'existant : `src/shared/character.ts`,
 > `src/main/services/character-validation.service.ts`,
 > `src/main/services/character-tick.service.ts`, `docs/CHARACTER_STATE_ARCHITECTURE.md`.

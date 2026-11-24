@@ -3,18 +3,18 @@
 ## Où en est le développement
 
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
-- **HEAD au démarrage de la tranche 2** : `033fced4fca62ff90ed4c498cde751c10326bd87`
-  (`feat(phase3c): add action contracts and registry`), identique à `origin/main`, arbre propre.
-- **Tranche courante** : **Phase 3C — implémentation progressive**. Tranches 1 et 2
-  terminées : contrats, catalogue, sept services purs et 51 tests unitaires dédiés.
-  Aucun service n'est encore appelé par le tick ; aucun schéma SQLite, IPC, preload, UI
-  ni appel LLM modifié.
-- **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution
-  passive déterministe des 8 besoins et 10 émotions. Le résultat de tick contient toujours
-  trois tableaux vides (`decisions`, `actionDeltas`, `actionRuntimeStates`) en attente de
-  l'intégration (tranche 3). **Aucune décision ni action autonome n'est encore exécutée par
-  le moteur.** Aucun environnement, lieu, objet, ressource partagée, relation, événement,
-  souvenir, mort ni dialogue n'existe.
+- **HEAD au démarrage de la tranche 3** : `7c426193331ff39e90acb7da26b06b1db8e8da7d`
+  (`feat(phase3c): add pure decision and action services`), identique à `origin/main`, arbre propre.
+- **Tranche courante** : **Phase 3C — tranche 3 intégration/persistance terminée**, en attente
+  de commit/push. Tranches 1 à 3 livrées : contrats, catalogue, sept services purs (51 tests),
+  branchement complet sur le tick et colonne SQLite `current_action_json`. Aucun IPC, preload,
+  UI, worker ni appel LLM modifié.
+- **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution passive
+  déterministe des 8 besoins et 10 émotions **puis** objectifs immédiats, scoring, décision,
+  effets numériques et runtime persistés. Les trois tableaux du résultat
+  (`decisions`, `actionDeltas`, `actionRuntimeStates`) sont désormais **remplis**. Aucun
+  environnement, lieu, objet, ressource partagée, relation, événement, souvenir, mort ni
+  dialogue n'existe.
 
 ## Ce qui vient d'être réalisé (Phase 3C — documentaire)
 
@@ -74,6 +74,23 @@
   émotions négligeables), sept services, rôle de `interruptionScored`, état d'implémentation.
 - Validations : check-deps OK, typecheck 4 configs OK, tests **209/209** (22 fichiers), build OK.
 
+## Ce qui vient d'être réalisé (Phase 3C — tranche 3)
+
+- `src/main/services/character-tick.service.ts` : snapshot étendu, deux jeux scorés, PRNG
+  séquencé par identifiant trié, explications, effets sur valeurs projetées, quantification
+  unique, `decisions`/`actionDeltas`/`actionRuntimeStates` remplis.
+- `src/main/services/decision-engine.service.ts` : garde anti-churn (score > 0 pour quitter
+  `idle` ou interrompre) et interruption limitée au besoin le plus urgent traité par l'action
+  de remplacement ; suppression des interruptions sans bénéfice mesurable.
+- `src/main/services/world-store.service.ts` : `current_action_json` au schéma + migration
+  additive, parse strict au chargement, écriture runtime/états/horloge/`rngState` en une
+  transaction et un seul `persist`, helpers de test `_getCharacterJsonColumnsForTests` et
+  `_setCharacterActionJsonForTests`.
+- `tests/simulation.test.ts`, `tests/simulation-long.test.ts`, `tests/character-tick.test.ts` :
+  6 tests SQLite, 9 tests longs adaptés, traçabilité PRNG. Total **215/215 tests**.
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md` :
+  statut d'implémentation mis à jour, observations de calibration et critères longs documentés.
+
 ## Décisions de conception Phase 3C
 
 - **Périmètre** : conception documentaire validée ; implémentation progressive sans
@@ -115,7 +132,7 @@
   `_setTickFailureForTests()`).
 - **Services Phase 3B** : `personality-influence`, `needs-evolution`,
   `emotion-evolution`, `character-tick` ; centièmes, `roundHalfEven` via `quantize`,
-  `safety` sans déclin, anti-saturation par marge vers la baseline, PRNG non consommé,
+  `safety` sans déclin, anti-saturation par marge vers la baseline, PRNG non consommé par ces règles seules (la décision 3C peut le tirer sur ex æquo),
   `TickDelta[]` calculés mais non exposés via IPC/UI.
 - **Worker/Manager** : worker planification/signaux uniquement ; main valide, verrou par
   monde, anti double-tick, broadcast ; aucune écriture SQLite depuis le worker.
@@ -126,28 +143,30 @@
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : OK.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : OK (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **209/209 OK** (22 fichiers).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **215/215 OK** (22 fichiers).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : OK.
-- Aucune donnée utilisateur lue ni modifiée ; aucun smoke Electron nécessaire (services purs,
-  aucun chemin runtime Electron/SQLite modifié).
+- Aucune donnée utilisateur lue ni modifiée ; aucun smoke Electron nécessaire (pas de changement
+  IPC/UI). Le chemin SQLite est couvert par les tests d'intégration avec base temporaire.
 
 ## Problèmes / points d'attention
 
 - `simulation_stopped` reste terminal pour `start/resume` : ne pas contourner cette garde
   avant validation produit de la recommandation §12 du document principal.
-- Les services Phase 3C existent et sont testés, mais le tick ne les appelle pas encore.
-  Ne pas présenter la simulation comme autonome avant l'intégration (tranche 3).
+- La simulation est désormais autonome au sens Phase 3C (décisions/actions numériques),
+  mais reste limitée aux actions Tier A : santé et hygiène peuvent rester à 0 faute
+  d'environnement (`wash` est Tier B). Ce n'est pas un bug de persistance.
 - Les seuils numériques de décision (scoring, urgences, durées, cooldowns, détection des
   boucles) sont des hypothèses configurables, à calibrer par simulation longue avant
   implémentation définitive.
-- Aucune table ni colonne d'action n'existe : `current_action_json` est une proposition
-  de migration additive future, pas un état réel.
+- `current_action_json` est une colonne réelle, migrée de façon additive ; une valeur
+  corrompue est une erreur technique et rollback du tick, jamais une réparation silencieuse.
 - Les explications complètes ne sont pas persistées par défaut (volume) ; reconstruction
   par rejeu prévue, table dédiée reportée.
 - Linux restreint (AppArmor/userns) : `--no-sandbox` dev uniquement via `scripts/dev.mjs`,
   sans modifier `src/main/security/window.ts`.
 - Ne pas lancer check-deps, typecheck, tests et build en parallèle : sous contention, le test
-  « 3000 ticks » dépasse son timeout de 5 s (147/148 observé). Relance isolée : 148/148 OK.
+  « 3000 ticks » a dépassé son timeout de 5 s (147/148 observé). Un délai explicite de 20 s
+  est maintenant appliqué à ce scénario ; la validation reste **séquentielle**.
 
 ## Fichiers importants à examiner
 
@@ -185,18 +204,11 @@ bash scripts/dev.sh
 
 ## Prochaine tâche recommandée
 
-1. **Finaliser la tranche Git de la tranche 2** : vérifier diff/absence secrets/data,
+1. **Finaliser la tranche Git de la tranche 3** : vérifier diff/absence secrets/data,
    committer, pousser `origin/main` sans force, vérifier hash local = distant et arbre propre.
    **Arrêt à cette étape si le push échoue.**
-2. Intégrer les sept services dans `character-tick.service.ts` : construire le snapshot
-   étendu par personnage, calculer les deux jeux de candidats (courant et post-interruption),
-   séquencer le PRNG par `characterId` trié, appliquer les effets sur les valeurs projetées
-   avant quantification, property `decisions`/`actionDeltas`/`actionRuntimeStates`.
-3. Ajouter `current_action_json` (TEXT, valeur par défaut du runtime) et l'écrire dans la
-   même transaction SQLite que les états, l'horloge et `rngState`, avec un seul `persist(db)`.
-   Toute runtime corrompu doit provoquer un rollback complet.
-4. Étendre `tests/world-store.test.ts` et `tests/simulation-long.test.ts` : affamé, fatigué,
-   anxieux, sociable, indépendant, besoins concurrents, action impossible/interrompue/longue,
-   plusieurs personnages, reprise après redémarrage, rejeu déterministe, rollback complet.
-5. **Décision produit toujours à trancher** : politique `simulation_stopped`
-   (nouvelle branche recommandée). Ne pas implémenter de reprise implicite.
+2. **Décision produit à trancher** : politique `simulation_stopped` (nouvelle branche recommandée).
+   Ne pas implémenter de reprise implicite ni `forkFromStopped` sans validation.
+3. Éventuellement, tranche dédiée table d'historique des actions, persistance intégrale des
+   `DecisionExplanation`, hystérésis des objectifs et activation des actions Tier B avec un
+   environnement réel.

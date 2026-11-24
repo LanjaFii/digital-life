@@ -2,6 +2,32 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3C, tranche 3 (intégration au tick et persistance atomique)
+
+### Added
+- `src/main/services/character-tick.service.ts` : branchement des sept services sur le tick, deux jeux de candidats scorés, PRNG séquencé par `characterId`, explications et artefacts d'audit remplis.
+- `src/main/services/world-store.service.ts` : colonne `characters.current_action_json` (schéma + migration additive), helpers de test `_getCharacterJsonColumnsForTests` / `_setCharacterActionJsonForTests`.
+- `tests/simulation.test.ts` : 6 tests SQLite Phase 3C (subsistance, action longue, rejeu après réouverture, rollback sur runtime corrompu, deux personnages, objectifs inchangés).
+
+### Changed
+- `tests/simulation-long.test.ts` : 9 tests longs avec PRNG/runtime continus, anti-boucle sur décisions et critères documentés pour l'oscillation homeostatique du bonheur.
+- `tests/character-tick.test.ts` : vérification de la traçabilité et du chaînage du PRNG.
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md` : statut d'implémentation et observations de calibration.
+- `PROGRESS.md`, `HANDOFF.md`, `README.md` : état après la tranche 3.
+
+### Fixed
+- Anti-churn : une action n'est plus retenue depuis `idle` ou pour interrompre une action active que si son score est strictement positif et, pour une interruption, si elle traite le besoin le plus urgent. Sans cette garde, un besoin non réparable (santé, hygiène sans environnement) provoquait plus de 1300 interruptions sans bénéfice sur 3000 ticks.
+- Le scénario « 3000 ticks » dispose d'un délai explicite de 20 s pour éviter les timeouts sous contention.
+
+### Removed
+- Aucun.
+
+### Technical decisions
+- Le runtime d'action, les besoins/émotions, l'horloge et `rngState` sont écrits dans une seule transaction avec un seul `persist(db)` ; un runtime corrompu reste une erreur technique avec rollback intégral.
+- `current_goals_json` n'est toujours jamais écrit par le moteur ; le libellé des objectifs n'est jamais interprété.
+- Une seule quantification par tick : `executeActionEffects` finalise les valeurs, l'orchestrateur ne les requantifie pas.
+- Validations : typecheck 4 configs OK, tests **215/215** (22 fichiers), build OK. Commit/push à venir.
+
 ## 2026-11-24 — Phase 3C, tranche 2 (services purs de décision et d'action)
 
 ### Added
