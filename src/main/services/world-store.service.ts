@@ -16,6 +16,17 @@ import type {
   UpdateTemplateInput,
 } from '../../shared/character';
 import type { CreateWorldInput, WorldListResult, WorldSummary } from '../../shared/world';
+import {
+  SIMULATION_MS_PER_TICK_AT_1X,
+  SIMULATION_SPEEDS,
+  SIMULATION_TICKS_PER_DAY,
+  isSimulationSpeed,
+  normalizeWorldSimulationStatus,
+  type SimulationClock,
+  type SimulationRuntimeStatus,
+  type SimulationSpeed,
+  type SimulationStatusView,
+} from '../../shared/simulation';
 import { generateCharactersForWorld } from './character-generator.service';
 import { validateCharacterDraft } from './character-validation.service';
 import { getWasmPath } from './resource.service';
@@ -106,6 +117,23 @@ function ensureSchema(db: Database): void {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_templates_updated_at ON character_templates(updated_at DESC);`);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS simulation_clock (
+      world_id TEXT PRIMARY KEY,
+      tick INTEGER NOT NULL DEFAULT 0,
+      day INTEGER NOT NULL DEFAULT 1,
+      hour INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'paused',
+      speed INTEGER NOT NULL DEFAULT 1,
+      rng_state INTEGER NOT NULL,
+      last_processed_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (world_id) REFERENCES worlds(id) ON DELETE CASCADE
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_simulation_clock_status ON simulation_clock(status);`);
+
   // Migrations additives (bases existantes).
   const worldColumns = db.exec("PRAGMA table_info(worlds)");
   const worldNames = new Set((worldColumns[0]?.values ?? []).map((row) => String(row[1])));
@@ -183,7 +211,7 @@ async function getDb(): Promise<Database> {
 
 function rowToWorld(row: Record<string, unknown>): WorldSummary {
   const mode = row.generation_mode === 'random' ? 'random' : 'empty';
-  const status = row.status === 'simulation_started' ? 'simulation_started' : 'preparation';
+  const status = normalizeWorldSimulationStatus(row.status);
   return {
     id: String(row.id),
     name: String(row.name),
@@ -399,10 +427,14 @@ function getWorldRow(db: Database, id: string): Record<string, unknown> | null {
   return row;
 }
 
+export function isWorldPreparationStatus(status: unknown): boolean {
+  return normalizeWorldSimulationStatus(status) === 'preparation';
+}
+
 function assertWorldPreparation(db: Database, worldId: string): void {
   const row = getWorldRow(db, worldId);
   if (!row) throw new Error('Monde introuvable.');
-  if (String(row.status) === 'simulation_started') {
+  if (!isWorldPreparationStatus(row.status)) {
     throw new Error('Les paramètres initiaux sont verrouillés après le démarrage de la simulation.');
   }
 }
@@ -712,11 +744,371 @@ export async function _resetWorldStoreForTests(): Promise<void> {
   sqlPromise = null;
 }
 
-/** Test : force le statut d'un monde pour vérifier le verrouillage futur (simulation démarrée). */
-export async function _setWorldStatusForTests(worldId: string, status: 'preparation' | 'simulation_started'): Promise<void> {
+function assertValidWorldId(worldId: string): string {
+  const id = typeof worldId === 'string' ? worldId.trim() : '';
+  if (!id) throw new Error('Identifiant de monde invalide.');
+  return id;
+}
+
+function normalizeSpeed(speed: unknown): SimulationSpeed {
+  if (!isSimulationSpeed(speed)) throw new Error('Vitesse de simulation invalide.');
+  return speed;
+}
+
+function clockRowToClock(row: Record<string, unknown>): SimulationClock {
+  const tick = Number(row.tick);
+  const day = Number(row.day);
+  const hour = Number(row.hour);
+  const speed = Number(row.speed);
+  const rngState = Number(row.rng_state);
+  const lastProcessedOrder = Number(row.last_processed_order);
+  const statusRaw = String(row.status);
+  const status: SimulationRuntimeStatus =
+    statusRaw === 'running' ? 'running' : statusRaw === 'stopped' ? 'stopped' : 'paused';
+  if (
+    !Number.isInteger(tick) || tick < 0 ||
+    !Number.isInteger(day) || day < 1 ||
+    !Number.isInteger(hour) || hour < 0 || hour > 23 ||
+    !isSimulationSpeed(speed) ||
+    !Number.isInteger(rngState) || rngState < 0 || rngState > 0xffffffff ||
+    !Number.isInteger(lastProcessedOrder) || lastProcessedOrder < 0
+  ) {
+    throw new Error('Horloge de simulation invalide en base.');
+  }
+  return {
+    worldId: String(row.world_id),
+    tick,
+    day,
+    hour,
+    status,
+    speed,
+    rngState: rngState >>> 0,
+    lastProcessedOrder,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function getSimulationClockRow(db: Database, worldId: string): Record<string, unknown> | null {
+  const stmt = db.prepare('SELECT * FROM simulation_clock WHERE world_id = ?');
+  stmt.bind([worldId]);
+  const row = stmt.step() ? stmt.getAsObject() : null;
+  stmt.free();
+  return row;
+}
+
+export async function getSimulationClock(worldId: string): Promise<SimulationClock | null> {
+  const id = assertValidWorldId(worldId);
+  const db = await getDb();
+  const row = getSimulationClockRow(db, id);
+  return row ? clockRowToClock(row) : null;
+}
+
+function getWorldOrThrow(db: Database, worldId: string): WorldSummary {
+  const row = getWorldRow(db, worldId);
+  if (!row) throw new Error('Monde introuvable.');
+  return rowToWorld(row);
+}
+
+function deriveDayHour(tick: number): { day: number; hour: number } {
+  return {
+    day: Math.floor(tick / SIMULATION_TICKS_PER_DAY) + 1,
+    hour: tick % SIMULATION_TICKS_PER_DAY,
+  };
+}
+
+function simulationSeed(worldSeed: number): number {
+  // Sépare le flux de simulation du flux de génération (même seed monde, domaines différents).
+  return (Math.trunc(worldSeed) ^ 0x85ebca6b) >>> 0;
+}
+
+function upsertClock(db: Database, clock: SimulationClock): void {
+  const stmt = db.prepare(`
+    INSERT INTO simulation_clock (
+      world_id, tick, day, hour, status, speed, rng_state, last_processed_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(world_id) DO UPDATE SET
+      tick = excluded.tick,
+      day = excluded.day,
+      hour = excluded.hour,
+      status = excluded.status,
+      speed = excluded.speed,
+      rng_state = excluded.rng_state,
+      last_processed_order = excluded.last_processed_order,
+      updated_at = excluded.updated_at
+  `);
+  stmt.run([
+    clock.worldId,
+    clock.tick,
+    clock.day,
+    clock.hour,
+    clock.status,
+    clock.speed,
+    clock.rngState >>> 0,
+    clock.lastProcessedOrder,
+    clock.createdAt,
+    clock.updatedAt,
+  ]);
+  stmt.free();
+}
+
+function setWorldStatus(db: Database, worldId: string, status: 'simulation_running' | 'simulation_paused' | 'simulation_stopped', updatedAt: string): void {
+  const stmt = db.prepare('UPDATE worlds SET status = ?, updated_at = ? WHERE id = ?');
+  stmt.run([status, updatedAt, worldId]);
+  stmt.free();
+}
+
+export async function recoverSimulationClocksAfterRestart(): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const stmt = db.prepare(`SELECT world_id, status, speed, rng_state, tick, day, hour, last_processed_order, created_at, updated_at
+    FROM simulation_clock WHERE status = 'running'`);
+  const toPause: string[] = [];
+  while (stmt.step()) toPause.push(String(stmt.getAsObject().world_id));
+  stmt.free();
+  if (toPause.length === 0) return;
+  db.run('BEGIN TRANSACTION;');
+  try {
+    for (const worldId of toPause) {
+      const row = getSimulationClockRow(db, worldId);
+      if (!row) continue;
+      const prev = clockRowToClock(row);
+      upsertClock(db, { ...prev, status: 'paused', updatedAt: now });
+      setWorldStatus(db, worldId, 'simulation_paused', now);
+    }
+    db.run('COMMIT;');
+    persist(db);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export async function getSimulationStatus(worldId: string): Promise<SimulationStatusView> {
+  const id = assertValidWorldId(worldId);
+  const db = await getDb();
+  const world = getWorldOrThrow(db, id);
+  const clockRow = getSimulationClockRow(db, id);
+  const clock = clockRow ? clockRowToClock(clockRow) : null;
+  return {
+    worldId: id,
+    worldStatus: world.status,
+    clock,
+    isActive: normalizeWorldSimulationStatus(world.status) === 'simulation_running' && clock?.status === 'running',
+  };
+}
+
+export async function startSimulation(worldId: string, speed: unknown = 1): Promise<SimulationStatusView> {
+  const id = assertValidWorldId(worldId);
+  const normalizedSpeed = normalizeSpeed(speed);
+  const db = await getDb();
+  const world = getWorldOrThrow(db, id);
+  const status = normalizeWorldSimulationStatus(world.status);
+  if (status === 'simulation_running') throw new Error('La simulation est déjà démarrée.');
+  if (world.characterCount <= 0) throw new Error('Impossible de démarrer une simulation sans personnage.');
+  if (status === 'simulation_stopped') {
+    throw new Error('Un monde arrêté ne peut pas être redémarré implicitement ; créez une nouvelle sauvegarde ou une reprise explicite documentée.');
+  }
+
+  const existing = getSimulationClockRow(db, id);
+  const now = new Date().toISOString();
+  db.run('BEGIN TRANSACTION;');
+  try {
+    let clock: SimulationClock;
+    if (!existing) {
+      if (status !== 'preparation') throw new Error('État de monde incohérent : horloge absente.');
+      const rngState = simulationSeed(world.seed);
+      clock = {
+        worldId: id,
+        tick: 0,
+        day: 1,
+        hour: 0,
+        status: 'running',
+        speed: normalizedSpeed,
+        rngState,
+        lastProcessedOrder: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+    } else {
+      const prev = clockRowToClock(existing);
+      if (status !== 'simulation_paused') throw new Error('Transition de démarrage invalide pour ce monde.');
+      clock = { ...prev, status: 'running', speed: normalizedSpeed, updatedAt: now };
+    }
+    upsertClock(db, clock);
+    setWorldStatus(db, id, 'simulation_running', now);
+    db.run('COMMIT;');
+    persist(db);
+    return getSimulationStatus(id);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export async function pauseSimulation(worldId: string): Promise<SimulationStatusView> {
+  const id = assertValidWorldId(worldId);
+  const db = await getDb();
+  const world = getWorldOrThrow(db, id);
+  const status = normalizeWorldSimulationStatus(world.status);
+  const clockRow = getSimulationClockRow(db, id);
+  if (status !== 'simulation_running' || !clockRow) {
+    throw new Error('Seule une simulation en cours peut être mise en pause.');
+  }
+  const prev = clockRowToClock(clockRow);
+  const now = new Date().toISOString();
+  db.run('BEGIN TRANSACTION;');
+  try {
+    upsertClock(db, { ...prev, status: 'paused', updatedAt: now });
+    setWorldStatus(db, id, 'simulation_paused', now);
+    db.run('COMMIT;');
+    persist(db);
+    return getSimulationStatus(id);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export async function resumeSimulation(worldId: string): Promise<SimulationStatusView> {
+  const id = assertValidWorldId(worldId);
+  const db = await getDb();
+  const world = getWorldOrThrow(db, id);
+  const status = normalizeWorldSimulationStatus(world.status);
+  const clockRow = getSimulationClockRow(db, id);
+  if (status !== 'simulation_paused' || !clockRow) {
+    throw new Error('Seule une simulation en pause peut être reprise.');
+  }
+  const prev = clockRowToClock(clockRow);
+  const now = new Date().toISOString();
+  db.run('BEGIN TRANSACTION;');
+  try {
+    upsertClock(db, { ...prev, status: 'running', updatedAt: now });
+    setWorldStatus(db, id, 'simulation_running', now);
+    db.run('COMMIT;');
+    persist(db);
+    return getSimulationStatus(id);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export async function stopSimulation(worldId: string): Promise<SimulationStatusView> {
+  const id = assertValidWorldId(worldId);
+  const db = await getDb();
+  const world = getWorldOrThrow(db, id);
+  const status = normalizeWorldSimulationStatus(world.status);
+  const clockRow = getSimulationClockRow(db, id);
+  if (!clockRow || (status !== 'simulation_running' && status !== 'simulation_paused')) {
+    throw new Error('Seule une simulation démarrée peut être arrêtée.');
+  }
+  const prev = clockRowToClock(clockRow);
+  const now = new Date().toISOString();
+  db.run('BEGIN TRANSACTION;');
+  try {
+    upsertClock(db, { ...prev, status: 'stopped', updatedAt: now });
+    setWorldStatus(db, id, 'simulation_stopped', now);
+    db.run('COMMIT;');
+    persist(db);
+    return getSimulationStatus(id);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export async function setSimulationSpeed(worldId: string, speed: unknown): Promise<SimulationStatusView> {
+  const id = assertValidWorldId(worldId);
+  const normalizedSpeed = normalizeSpeed(speed);
+  const db = await getDb();
+  getWorldOrThrow(db, id);
+  const clockRow = getSimulationClockRow(db, id);
+  if (!clockRow) throw new Error('Aucune horloge de simulation pour ce monde.');
+  const prev = clockRowToClock(clockRow);
+  const now = new Date().toISOString();
+  db.run('BEGIN TRANSACTION;');
+  try {
+    upsertClock(db, { ...prev, speed: normalizedSpeed, updatedAt: now });
+    db.run('COMMIT;');
+    persist(db);
+    return getSimulationStatus(id);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+/**
+ * Applique exactement un tick. Le tick n'altère aucun personnage pour l'instant
+ * (Phase 3A infrastructure) ; il avance uniquement l'horloge de façon atomique.
+ */
+export async function stepSimulation(worldId: string): Promise<SimulationStatusView> {
+  const id = assertValidWorldId(worldId);
+  const db = await getDb();
+  const world = getWorldOrThrow(db, id);
+  const status = normalizeWorldSimulationStatus(world.status);
+  const clockRow = getSimulationClockRow(db, id);
+  if (!clockRow || (status !== 'simulation_running' && status !== 'simulation_paused')) {
+    throw new Error('La simulation doit être démarrée pour exécuter un tick.');
+  }
+  const prev = clockRowToClock(clockRow);
+  const now = new Date().toISOString();
+  const nextTick = prev.tick + 1;
+  const { day, hour } = deriveDayHour(nextTick);
+  db.run('BEGIN TRANSACTION;');
+  try {
+    upsertClock(db, {
+      ...prev,
+      tick: nextTick,
+      day,
+      hour,
+      // step en pause conserve la pause ; step en running conserve running
+      status: prev.status,
+      lastProcessedOrder: 0,
+      updatedAt: now,
+    });
+    // Le statut du monde reste cohérent avec l'horloge.
+    setWorldStatus(db, id, prev.status === 'running' ? 'simulation_running' : 'simulation_paused', now);
+    db.run('COMMIT;');
+    persist(db);
+    return getSimulationStatus(id);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+/** Test/utilitaire : force l'horloge pour des scénarios déterministes. */
+export async function _setSimulationClockForTests(worldId: string, clock: Partial<SimulationClock>): Promise<void> {
+  const id = assertValidWorldId(worldId);
+  const db = await getDb();
+  const existing = getSimulationClockRow(db, id);
+  if (!existing) throw new Error('Horloge de simulation introuvable.');
+  const prev = clockRowToClock(existing);
+  const next: SimulationClock = { ...prev, ...clock, worldId: id, updatedAt: new Date().toISOString() };
+  const { day, hour } = deriveDayHour(next.tick);
+  next.day = day;
+  next.hour = hour;
+  db.run('BEGIN TRANSACTION;');
+  try {
+    upsertClock(db, next);
+    db.run('COMMIT;');
+    persist(db);
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+/** Test : force le statut d'un monde pour vérifier le verrouillage futur. */
+export async function _setWorldStatusForTests(
+  worldId: string,
+  status: 'preparation' | 'simulation_running' | 'simulation_paused' | 'simulation_stopped' | 'simulation_started',
+): Promise<void> {
   const db = await getDb();
   const stmt = db.prepare('UPDATE worlds SET status = ? WHERE id = ?');
-  stmt.run([status, worldId]);
+  stmt.run([normalizeWorldSimulationStatus(status), worldId]);
   stmt.free();
   persist(db);
 }

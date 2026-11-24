@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : Phase 2 — Conception du système d'évolution des personnages (**tranche documentaire uniquement**).
-- **Avancement approximatif** : Phase 1 fonctionnelle à ~85 % (CRUD instances complet) ; Phase 2 implémentation 0 % (conception en cours).
+- **Phase** : **Phase 3A — Infrastructure fondamentale du moteur de simulation** (implémentée, validée localement, à committer/pousser dans cette tranche).
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure terminée ; comportements autonomes Phase 3B+ non démarrés.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `669c785101aa0a10e6f69506d870b283c77a1510` (`feat(phase1): safe character instance deletion in preparation worlds`). Cette tranche ne modifie aucun code de simulation/schéma/IPC/UI ; elle produit le contrat architectural Phase 2.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `993936dd1804a7524429800aba23937c980e2d8e` (`docs(phase2): define character evolution architecture contracts`).
 
 ## Fonctionnalités terminées
 
@@ -39,11 +39,24 @@
 - [x] Migration additive : `characters.template_id/updated_at/initial_*_json/current_*_json` backfillés depuis les colonnes legacy ; anciens mondes/personnages préservés (test dédié sur base legacy).
 - [x] Suppression d'une instance de personnage : action sur la carte et la fiche, confirmation modale identifiant personnage/monde et caractère définitif, annulation, suppression via IPC dédié `character:delete`, actualisation liste/compteur, retour à la liste depuis la fiche, notification de succès, erreurs IPC affichées. Garde main : statut `preparation`, ids valides, appartenance réelle au monde ; modèle original et instances des autres mondes intacts, compteur resynchronisé, persistance SQLite.
 
+## Phase 3A — Infrastructure simulation (terminée dans cette tranche)
+
+- [x] Audit complet (docs, git, schéma, IPC, PRNG, tests, scripts, UI).
+- [x] `SeededRng` sérialisable : `normalizeSeed`, `getState()`, `setState()` avec validation uint32 ; tests de déterminisme/reprise.
+- [x] Contrats partagés `src/shared/simulation.ts` (clock, status, speed, commandes, normalisation legacy).
+- [x] SQLite : table additive `simulation_clock`, index, migration non destructive, validation des données.
+- [x] Store simulation : `start/pause/resume/step/setSpeed/stop/getStatus`, transactions atomiques, `persist` unique, recovery `running -> paused` au démarrage.
+- [x] Séparation domaine PRNG simulation : `world.seed ^ 0x85ebca6b` (génération inchangée).
+- [x] Worker Node `worker_threads` (`src/main/simulation/simulation.worker.ts`) : planification/signaux uniquement, sans SQLite.
+- [x] Manager main (`simulation-manager.service.ts`) : verrou par monde, anti double-tick, sync worker, broadcast statut, shutdown propre.
+- [x] IPC/preload/main : canaux simulation typés/validés, événement `simulation:status-changed`, `recoverSimulationClocksAfterRestart`, `shutdownSimulationManager`.
+- [x] UI WorldView minimale : contrôles start/pause/resume/step/stop, vitesses 1x/2x/5x/10x, affichage jour/heure/tick/statut depuis le main, édition personnages désactivée hors préparation.
+- [x] `simulation_stopped` : arrêt volontaire, données conservées, pas de redémarrage implicite (décision documentée).
+
 ## Fonctionnalités non commencées
 
-- [ ] Phase 2 implémentation : aucun moteur, aucun worker, aucune évolution dynamique, aucun tick, aucune relation/événement/mémoire opérationnel, aucun appel LLM/OpenRouter.
-- [ ] Phase 3 : moteur de simulation dans un worker (démarrage réel, `currentState` évolutif, verrouillage UI effectif).
-- [ ] Phases 4 à 8 : relations/mémoire, mort, LLM, interface avancée, stabilisation.
+- [ ] Phase 3B+ : évolution dynamique des personnages au tick (besoins, émotions, objectifs, décisions, actions, conséquences).
+- [ ] Phases 4 à 8 : relations, événements, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
 ## Conception Phase 2 (documentaire, terminée dans cette tranche)
 
@@ -92,6 +105,14 @@ Ajouts tranche conception Phase 2 (documentaire uniquement) :
 - `docs/EVENT_AND_MEMORY_SYSTEM.md`
 - `docs/SIMULATION_TIME_AND_ENGINE.md`
 
+Ajouts tranche Phase 3A (infrastructure simulation) :
+- `src/shared/simulation.ts`
+- `src/main/ipc/simulation.ipc.ts`
+- `src/main/services/simulation-manager.service.ts`
+- `src/main/simulation/simulation.worker.ts`
+- `tests/prng.test.ts`
+- `tests/simulation.test.ts`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -102,39 +123,15 @@ Ajouts tranche conception Phase 2 (documentaire uniquement) :
 - Tranche création manuelle + bibliothèque : `src/shared/character.ts`, `src/shared/world.ts`, `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/main.ts`, `src/main/services/world-store.service.ts`, `src/main/services/character-generator.service.ts`, `src/renderer/App.tsx`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/character-generation.test.ts`, `tests/world-resume-ui.test.tsx`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
 - Tranche suppression d'instance : `src/shared/ipc.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/character.ipc.ts`, `src/preload/preload.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/world-resume-ui.test.tsx`, `tests/character-library-ui.test.tsx`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
 - Tranche conception Phase 2 (documentaire) : `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/RELATIONSHIP_SYSTEM.md` (réécrit/étendu), `docs/EVENT_AND_MEMORY_SYSTEM.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
+- Tranche Phase 3A (infrastructure simulation) : `src/main/services/prng.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/world.ipc.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/ipc.ts`, `src/shared/world.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/UseInWorldDialog.tsx`, `src/renderer/styles/global.css`, `scripts/test.mjs`, `tests/phase0.test.ts`, `tests/character-library.test.ts`, `tests/character-library-ui.test.tsx`, `tests/character-deletion-ui.test.tsx`, `tests/world-resume-ui.test.tsx`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/DEVELOPMENT.md`, `README.md`, `CHANGELOG.md`, `PROGRESS.md`, `HANDOFF.md`.
 
 ## Tests réussis
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **88/88 passés** (8 fichiers : phase0, world-store, character-generation, world-resume-ui, character-library, character-library-ui, character-deletion, character-deletion-ui).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **102/102 passés** (10 fichiers).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
-- **Lancement réel Electron dev** (Linux restreint, 2026-11-23) : Vite + Electron `--no-sandbox --disable-gpu --remote-debugging-port=9229` (dev uniquement, `src/main/security/window.ts` inchangé). Smoke CDP en 2 phases avec **redémarrage réel** d'Electron, 10 parcours validés :
-  1. création manuelle d'Alice (sociabilité 85) dans Smoke A via le formulaire 6 étapes ;
-  2. enregistrement simultané dans la bibliothèque (case cochée) ;
-  3. modèle + instance retrouvés après redémarrage ;
-  4. modification du modèle (sociabilité 95) sans effet sur l'instance existante (85) ;
-  5. ajout du modèle dans Smoke B via « Ajouter depuis ma bibliothèque » (95) ;
-  6. ajout du même modèle dans Smoke C (95), ids distincts ;
-  7. modification de l'instance de Smoke B (sociabilité 20) ;
-  8. indépendance vérifiée : A=85, B=20, C=95, modèle=95 ;
-  9. suppression du modèle avec confirmation ;
-  10. instances intactes (A=2 via « Utiliser », B=1, C=1), `template_id` NULL.
-  Bonus : action « Utiliser » depuis la bibliothèque validée. Migration de la base legacy réelle vérifiée au lancement. Mondes/modèles de smoke supprimés ; base utilisateur restaurée à son état pré-smoke.
-
-- **Lancement réel Electron dev** (Linux restreint, 2026-11-24) pour la suppression d'instance : Vite + Electron `--no-sandbox --disable-gpu --remote-debugging-port=9229` (dev uniquement), smoke CDP en 2 phases avec **redémarrage réel** :
-   1. création de deux mondes (`Del A` : 3 personnages aléatoires, `Del B` : 1) ;
-   2. création d'un modèle + instanciation dans A et B ;
-   3. ouverture de la confirmation depuis une carte : nom du personnage, monde, caractère définitif affichés ;
-   4. annulation : aucune suppression, liste inchangée ;
-   5. confirmation depuis la carte : instance supprimée, carte retirée, compteur 4 → 3, notification de succès ;
-   6. suppression de l'instance du modèle dans A : modèle intact, instance B intacte, instance A supprimée ;
-   7. suppression depuis la fiche détaillée : retour automatique à la liste, compteur 3 → 1, notification ;
-   8. tentative IPC cross-world (`deleteCharacter(idB, worldA)`) : refusée, instance B intacte ;
-   9. tentative IPC avec identifiant vide : refusée ;
-   10. après redémarrage réel : suppressions persistées (A=1, B=1), modèle intact, compteurs corrects ;
-   11. nettoyage des mondes/modèles de smoke puis restauration byte-identique de la base utilisateur.
-
+- **Smoke Electron réel Linux** (2026-11-24, `--no-sandbox --disable-gpu`, CDP, 2 lancements avec redémarrage réel) : création monde `SMOKE-SIM` (seed 123, 2 personnages), start tick 0 running, pause, step -> tick 1, vitesse 10x, fermeture, relance restaurée (tick 1, paused, `rngState=2246822416`, world `simulation_paused`), resume, step -> tick 2, suppression monde smoke, `SMOKE_OK`. DB utilisateur sauvegardée/restaurée (`/tmp/dl-worlds-backup.sqlite`) avant commit.
 ## Tests échoués
 
 - Aucun.

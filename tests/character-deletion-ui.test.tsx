@@ -73,6 +73,14 @@ function installApi(overrides: Partial<DigitalLifeApi> = {}): DigitalLifeApi {
     updateTemplate: vi.fn(),
     deleteTemplate: vi.fn(),
     instantiateTemplate: vi.fn(),
+    simulationGetStatus: vi.fn().mockResolvedValue({ worldId: 'world-1', worldStatus: 'preparation', clock: null, isActive: false }),
+    simulationStart: vi.fn().mockResolvedValue({ worldId: 'world-1', worldStatus: 'simulation_running', clock: { worldId: 'world-1', tick: 0, day: 1, hour: 0, status: 'running', speed: 1, rngState: 1, lastProcessedOrder: 0, createdAt: '', updatedAt: '' }, isActive: true }),
+    simulationPause: vi.fn(),
+    simulationResume: vi.fn(),
+    simulationStep: vi.fn(),
+    simulationSetSpeed: vi.fn(),
+    simulationStop: vi.fn(),
+    onSimulationStatusChanged: vi.fn().mockReturnValue(() => {}),
     ...overrides,
   };
   Object.defineProperty(window, 'digitalLife', { value: api, configurable: true, writable: true });

@@ -1,19 +1,34 @@
-# Temps interne, ticks et moteur — conception Phase 2
+# Temps interne, ticks et moteur — conception Phase 2 / implémentation Phase 3A
 
-> **Statut : proposition architecturale. Aucun moteur, aucun worker, aucun tick et aucun
-> démarrage de monde n'est implémenté.** `worlds.status` existe déjà (`preparation` |
-> `simulation_started`) et sert de garde, mais rien ne le fait passer à `simulation_started`.
-> Ce document précise `docs/SIMULATION_ENGINE.md` (cycle cible, phase 3) sans créer de code.
+> **Statut : Phase 3A implémentée (infrastructure).** L'horloge, le PRNG sérialisable, la
+> persistance `simulation_clock`, le worker Node `worker_threads`, les commandes IPC/main
+> et l'UI minimale de contrôle existent. **Aucun comportement autonome de personnage,
+> relation, événement, souvenir, mort ou appel LLM n'est implémenté** : un tick avance
+> uniquement l'horloge de façon atomique et déterministe.
+
+## État d'implémentation Phase 3A
+
+| Élément | État | Réalité |
+|---|---|---|
+| `SeededRng.getState()/setState()` | Implémenté | uint32, validation stricte, normalisation seed. |
+| `simulation_clock` | Implémenté | Table additive SQLite, une horloge par monde, migration non destructive. |
+| Worker | Implémenté | `src/main/simulation/simulation.worker.ts` (Node `worker_threads`), planification/signaux uniquement, pas de SQLite. |
+| Manager main | Implémenté | Validation, verrou par monde, anti double-tick, sync worker, broadcast statut. |
+| IPC/preload | Implémenté | `simulation:status/start/pause/resume/step/speed/stop` + `simulation:status-changed`. |
+| UI minimale | Implémenté | WorldView : statut, jour/heure, tick, start/pause/resume/step/stop, vitesse 1x/2x/5x/10x. |
+| Reprise après redémarrage | Implémenté | Horloges `running` récupérées en `paused` au démarrage ; pas d'auto-reprise. |
+| Tick métier | Non implémenté | Le tick n'altère pas les personnages/relations/événements/mémoires. |
+| LLM / mort / relations / événements / souvenirs | Non implémenté | Hors périmètre Phase 3A. |
 
 ## 1. Audit : patrimoine réel pour le temps
 
 | Élément | Réel aujourd'hui | Conséquence pour la conception |
 |---|---|---|
 | `worlds.seed` | INTEGER, généré aléatoirement ou fourni, utilisé par `generateCharactersForWorld()` | Point de départ naturel du PRNG métier, mais il faut une **sous-seed d'exécution** distincte de la sous-seed de génération. |
-| `SeededRng` (`src/main/services/prng.ts`) | mulberry32, `next/int/pick/chance`, **état privé non sérialisable** | Ajouter `getState()/setState()` **[Planifié]** avant tout tick : sinon reproductibilité impossible après reprise. |
-| `worlds.status` | `preparation` par défaut, garde main sur create/update/delete | Peut devenir le verrou de démarrage ; aucun handler ne le modifie encore. |
+| `SeededRng` (`src/main/services/prng.ts`) | mulberry32, `next/int/pick/chance`, état sérialisable (`getState/setState`) | Implémenté en Phase 3A ; `setState` refuse les états non uint32. |
+| `worlds.status` | `preparation` par défaut, garde main étendue aux statuts simulation | Implémenté : `simulation_running/paused/stopped`, lecture legacy `simulation_started` normalisée. |
 | `characters.updated_at` | date ISO de dernière écriture | Horodatage **réel**, pas un temps simulé ; ne pas l'utiliser comme horloge de simulation. |
-| `src/main/simulation/` | dossier vide | Tout est à créer ; aucun code à réutiliser. |
+| `src/main/simulation/` | `simulation.worker.ts` | Worker de planification implémenté ; logique métier de tick reste à ajouter en Phase 3B+. |
 | Persistance | `db.export()` + `writeFileSync` après chaque mutation | Un tick complet = **une seule écriture disque** (transaction + export) pour éviter un état partiel. |
 | IPC | canaux stricts, renderer sans Node | Les commandes (`start/pause/step/speed`) devront être des canaux dédiés, validés main, sans accès DB côté renderer. |
 | UI | aucune simulation, aucun bouton de démarrage | Ne pas ajouter de faux bouton : la commande n'existera qu'avec le moteur. |
@@ -91,7 +106,7 @@ export interface SimulationCommand {
 - Le statut `paused/running` de `SimulationClock` est distinct de `worlds.status` : le
   monde reste `simulation_started` même en pause, donc les gardes restent actives.
 
-### 3.1 Table SQLite additive proposée (`simulation_clock` — [Planifié], à ne pas créer maintenant)
+### 3.1 Table SQLite additive (`simulation_clock` — implémentée Phase 3A)
 
 `world_id` TEXT PK (FK → `worlds(id) ON DELETE CASCADE`), `tick` INTEGER NOT NULL,
 `day` INTEGER, `hour` INTEGER, `status` TEXT, `speed` INTEGER, `rng_state` INTEGER,

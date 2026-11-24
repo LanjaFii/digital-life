@@ -363,7 +363,7 @@ describe('Verrouillage après démarrage de simulation (préparé, pas de moteur
     const { character } = await createCharacterInWorld({ worldId: world.id, ...makeDraft() });
     const template = await createTemplate(makeDraft());
     await _setWorldStatusForTests(world.id, 'simulation_started');
-    expect((await getWorld(world.id)).status).toBe('simulation_started');
+    expect((await getWorld(world.id)).status).toBe('simulation_running');
     await expect(createCharacterInWorld({ worldId: world.id, ...makeDraft() })).rejects.toThrow(/verrouillés/i);
     await expect(instantiateTemplate({ templateId: template.id, worldId: world.id })).rejects.toThrow(/verrouillés/i);
     await expect(updateCharacterInstance({ id: character.id, worldId: world.id, ...makeDraft() })).rejects.toThrow(/verrouillés/i);

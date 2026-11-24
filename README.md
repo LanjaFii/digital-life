@@ -5,9 +5,9 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet). Phase 2 en **conception architecturale** (aucun moteur/worker/LLM implémenté).
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale).
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
-> tests (88/88), build et smoke tests réels Electron validés. Le code réel et `PROGRESS.md` font foi.
+> tests (102/102), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
 
 ## Fonctionnalités
 
@@ -34,11 +34,12 @@ conséquences calculées par le moteur.
   (nom du personnage, monde, suppression définitive), annulation possible, liste et compteur
   actualisés, retour à la liste depuis la fiche. Refusée côté main hors préparation ;
   le modèle d'origine et les instances des autres mondes restent intacts (Phase 1).
+- **Infrastructure simulation Phase 3A** : horloge interne persistée (`simulation_clock`), PRNG sérialisable/restaurable, worker Node `worker_threads` piloté par le main, commandes IPC `start/pause/resume/step/setSpeed/stop/getStatus`, reprise après redémarrage (running → paused), UI minimale de contrôle du temps (jour/heure/tick/vitesse/statut). Aucun comportement autonome de personnage pour l'instant.
 
-### Planifiées (phases 2 à 8)
-Évolution dynamique des personnages, moteur multi-agents dans un worker,
-relations et mémoire, mort et deuil, dialogues OpenRouter facultatifs,
-tableaux de bord et statistiques, packaging.
+### Planifiées (phases 3B+ à 8)
+Évolution dynamique des personnages, décisions/actions autonomes, relations et mémoire,
+événements, mort et deuil, dialogues OpenRouter facultatifs, tableaux de bord et
+statistiques, packaging.
 
 ### Documentation de conception (Phase 2, documentaire uniquement)
 - [Architecture de l'état des personnages](docs/CHARACTER_STATE_ARCHITECTURE.md)
@@ -109,9 +110,9 @@ Voir `docs/LLM_CONFIGURATION.md`.
 ## Sauvegardes
 
 Base SQLite unique : `data/saves/worlds.sqlite` (mondes, personnages, modèles de
-bibliothèque), écrite par le processus principal uniquement. Migration additive
-automatique des bases existantes. Backups dans `data/backups/`, export/import et
-sauvegarde périodique : **[Planifié]**. Voir `docs/DATABASE.md`.
+bibliothèque, horloges de simulation), écrite par le processus principal uniquement.
+Migration additive automatique des bases existantes. Backups dans `data/backups/`,
+export/import et sauvegarde périodique : **[Planifié]**. Voir `docs/DATABASE.md`.
 
 ## Documentation
 

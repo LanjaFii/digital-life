@@ -27,10 +27,11 @@ Tous les scripts utilisent le Node local `.tools/node/versions/<version>-<os>-<a
 
 ## Modifier les paramètres de simulation
 
-Les valeurs par défaut sont définies dans le module de configuration du monde
-(phase 1). Modifier une valeur par défaut nécessite : mise à jour du code,
-mise à jour de `docs/SIMULATION_ENGINE.md` ou du document concerné, test, entrée
-dans CHANGELOG.md.
+Les constantes Phase 3A sont centralisées dans `src/shared/simulation.ts`
+(`SIMULATION_SPEEDS`, `SIMULATION_TICKS_PER_DAY`, `SIMULATION_HOURS_PER_TICK`,
+`SIMULATION_MS_PER_TICK_AT_1X`). Modifier une valeur nécessite : mise à jour du
+module partagé, tests de régression (horloge, persistance, worker/UI), mise à jour
+de `docs/SIMULATION_TIME_AND_ENGINE.md` et `docs/DATABASE.md`.
 
 ## Ajouter une nouvelle action
 

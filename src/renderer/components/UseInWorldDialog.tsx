@@ -83,7 +83,7 @@ export function UseInWorldDialog({ template, onClose }: Props) {
                     type="button"
                     className={`library-picker-item ${selectedWorldId === w.id ? 'active' : ''}`}
                     onClick={() => setSelectedWorldId(w.id)}
-                    disabled={w.status === 'simulation_started'}
+                    disabled={w.status !== 'preparation'}
                   >
                     <strong>{w.name}</strong>
                     <span className="muted">{w.characterCount} personnage{w.characterCount > 1 ? 's' : ''}</span>

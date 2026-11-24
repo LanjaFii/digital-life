@@ -2,133 +2,80 @@
 
 ## Où en est le développement
 
-Phase 0 validée. Phase 1 fonctionnelle (CRUD instances complet), dernière tranche code
-validée et poussée : `669c785101aa0a10e6f69506d870b283c77a1510` (suppression d'instance,
-88/88 tests). **Tranche courante : conception architecturale Phase 2 (documentaire uniquement)**.
-Aucun moteur, worker, tick, évolution dynamique, relation/événement/mémoire opérationnel,
-appel OpenRouter/LLM, ni modification de schéma/IPC/UI n'a été implémenté.
+- **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
+- **Dernier commit poussé avant cette tranche** : `993936dd1804a7524429800aba23937c980e2d8e` (`docs(phase2): define character evolution architecture contracts`).
+- **Tranche courante** : **Phase 3A — infrastructure fondamentale du moteur de simulation**, implémentée et validée localement (tests/typecheck/build/smoke Electron réel OK). Cette tranche doit être commitée/poussée après mise à jour documentaire.
+- **Périmètre réalisé** : PRNG sérialisable, horloge simulation persistée SQLite, worker Node `worker_threads` piloté par le main, commandes IPC/preload/main, UI minimale de contrôle, reprise après redémarrage. **Aucun comportement autonome** (besoins/émotions/décisions/actions/relations/événements/souvenirs/mort/LLM).
 
-## Ce qui vient d'être réalisé
+## Ce qui vient d'être réalisé (Phase 3A)
 
-- **Architecture modèle/instance** (`src/shared/character.ts`) :
-  - `CharacterTemplate` : modèle de bibliothèque (identité + paramètres de départ + dates).
-  - `CharacterInstance` (alias `Character`) : personnage d'un monde, `worldId`,
-    `templateId` informatif nullable, `initialState` + `currentState` (`CharacterState`
-    = traits/émotions/besoins/objectifs), `createdAt`/`updatedAt`.
-  - `CharacterDraft` pour création/édition ; clés exactes `TRAIT_KEYS` (21),
-    `EMOTION_KEYS` (10), `NEED_KEYS` (8).
-- **SQLite** (`world-store.service.ts`) : nouvelle table `character_templates` ;
-  `characters` étendue additivement (`template_id`, `updated_at`, `initial_*_json`,
-  `current_*_json`, backfill legacy) ; `worlds.status` (`preparation`/`simulation_started`).
-  Migration non destructive vérifiée par test dédié **et** au smoke sur la base réelle.
-- **Indépendance** : instanciation = copie profonde + nouvel UUID ; aucune synchronisation
-  modèle ↔ instances ; suppression modèle → `template_id = NULL`, instances intactes ;
-  garde `assertWorldPreparation` (verrouillage futur, pas de faux démarrage).
-- **UI** : `CharacterForm` (6 étapes, sliders FR, génération aléatoire cohérente via
-  `character:random-draft`), `LibraryView` (« Ma bibliothèque » : cartes, recherche,
-  détail, modifier, supprimer avec confirmation, créer sans monde, « Utiliser »),
-  `AddFromLibraryDialog` (sélection → aperçu → confirmation → actualisation monde),
-  `UseInWorldDialog` (choix du monde), édition d'instance depuis la fiche personnage.
-- **Validation main** : `character-validation.service.ts` (chaînes/longueurs, âge 18-65,
-  genre, entiers 0-100, 21/10/8 clés, 1 principal + 2 secondaires, existence monde/modèle).
-- **IPC/preload** : `character:create/update/random-draft`, `template:list/get/create/update/delete/instantiate`.
-- **Tests** : `tests/character-library.test.ts` (24 tests service dont migration legacy),
-  `tests/character-library-ui.test.tsx` (13 tests UI jsdom). Total **70/70**.
-- **Smoke réel** (CDP, 2 lancements Electron avec redémarrage) : les 10 parcours de la
-  séquence validés (création → bibliothèque → redémarrage → édition modèle → 2 mondes →
-  édition instance → indépendance A=85/B=20/C=95/modèle=95 → suppression modèle →
-  instances intactes). Base utilisateur restaurée après smoke.
-- **Suppression d'instance (tranche 2026-11-24)** :
-  - service `deleteCharacterInstance(id, worldId)` : trim/validation des ids, `assertWorldPreparation`,
-    `SELECT id ... WHERE id = ? AND world_id = ?` avant suppression, `DELETE` avec les deux
-    prédicats, `syncWorldCharacterCount`, `persist` ; modèle jamais touché, aucun changement de schéma ;
-  - IPC `character:delete` (`id`, `worldId` validés côté main) + preload `deleteCharacter(id, worldId)` ;
-  - UI : actions « Supprimer » sur chaque carte et « Supprimer ce personnage » dans la fiche,
-    `ConfirmDeleteCharacterDialog` (nom du personnage, monde, caractère définitif, annulation),
-    actualisation liste/compteur, retour à la liste depuis la fiche, notification `role="status"`,
-    erreurs IPC en `role="alert"` ; cartes passées de `<button>` à `<div>` + bouton interne
-    pour éviter les boutons imbriqués ; `onDelete` optionnel sur `CharacterDetail` (inchangé
-    pour les modèles de bibliothèque) ;
-  - tests : `tests/character-deletion.test.ts` (13 tests service : suppression valide, monde
-    vide/sans correspondance, id inexistant, cross-world, statut verrouillé, modèle conservé,
-    instances des autres mondes conservées, compteur, persistance après reset, ids invalides,
-    monde inexistant, autres personnages inchangés, instance sans modèle) et
-    `tests/character-deletion-ui.test.tsx` (5 tests jsdom : confirmation/annulation,
-    actualisation + notification, erreur IPC, retour à la liste depuis la fiche, annulation
-    depuis la fiche). Total **88/88** (8 fichiers) ;
-  - smoke réel : annulation, suppression carte (compteur 4→3), suppression de l'instance
-    d'un modèle (modèle et instance B intacts), suppression fiche (compteur 3→1 + retour liste),
-    refus IPC cross-world et id vide, persistance après redémarrage, nettoyage + DB restaurée
-    byte-identique.
-
-- **Conception Phase 2 (tranche documentaire, 2026-11-24)** :
-  - audit confirmé : `CharacterState` 21/10/8, `initialState`/`currentState`, legacy `*_json`
-    miroir, `SeededRng` sans sérialisation, `src/main/simulation/` vide, aucune relation/événement/mémoire/tick/worker/LLM ;
-  - docs créés/étendus : `docs/CHARACTER_STATE_ARCHITECTURE.md`,
-    `docs/RELATIONSHIP_SYSTEM.md`, `docs/EVENT_AND_MEMORY_SYSTEM.md`,
-    `docs/SIMULATION_TIME_AND_ENGINE.md` (Mermaid, contrats TS/SQLite additifs proposés) ;
-  - décisions proposées : `initialState` immuable après `simulation_started`, worker seul
-    écrivain de `currentState`, transaction par tick, PRNG métier sérialisable (`rngState`),
-    relations asymétriques `ownerId→targetId`, journal d'événements immuable, souvenirs
-    subjectifs `active/faded` jamais supprimés physiquement, temps logique (tick) jamais
-    `Date.now()`, LLM hors décisions/état/événements ;
-  - **aucun code/schéma/IPC/UI modifié** ; paramètres de tick/fréquence/snapshot restent
-    provisoires et explicitement à calibrer.
+- **PRNG** (`src/main/services/prng.ts`) : `normalizeSeed`, `getState(): uint32`, `setState(uint32)` avec validation stricte. La génération de personnages existante reste inchangée.
+- **Contrats partagés** (`src/shared/simulation.ts`) : `SimulationClock`, `SimulationStatusView`, vitesses 1/2/5/10, constantes temps (`24 ticks/jour`, `1 tick = 1h`, `60s/tick à 1x`), normalisation `simulation_started` legacy → `simulation_running`.
+- **SQLite/store** (`src/main/services/world-store.service.ts`) : table additive `simulation_clock` (FK cascade `world_id`), index status, migrations additives. Fonctions : `getSimulationStatus/start/pause/resume/step/setSpeed/stop`, `recoverSimulationClocksAfterRestart`, helpers test. Chaque commande/tick = transaction SQLite + `persist(db)` unique. Tick Phase 3A = avance horloge uniquement.
+- **Domaine PRNG simulation** : `simulationSeed = (world.seed ^ 0x85ebca6b) >>> 0`, séparé du flux de génération.
+- **Statuts monde** : `preparation | simulation_running | simulation_paused | simulation_stopped` (+ lecture legacy `simulation_started`). Édition manuelle des personnages refusée dès que le monde n'est plus en préparation.
+- **Worker** (`src/main/simulation/simulation.worker.ts`) : planifie les ticks par `setInterval` selon vitesse, émet `tick`/`step`; commandes `configure/start/pause/stop/setSpeed/step/shutdown`; pas d'accès SQLite/renderer.
+- **Manager main** (`src/main/services/simulation-manager.service.ts`) : crée le worker, verrou par monde, anti double-tick, valide et applique tick via store, sync worker, broadcast `simulation:status-changed`, shutdown propre.
+- **IPC/preload** : `simulation:status/start/pause/resume/step/speed/stop` + `simulation:status-changed`. Validation des ids/vitesses côté main ; renderer reçoit uniquement des statuts validés.
+- **UI** (`src/renderer/components/WorldView.tsx`) : panneau temps interne, jour/heure/tick, statut, Start/Pause/Resume/Step/Stop, vitesses 1x/2x/5x/10x, état issu du main. Boutons création/modif/suppression personnages désactivés hors préparation.
+- **Tests ajoutés/mis à jour** : `tests/prng.test.ts`, `tests/simulation.test.ts`, mise à jour `tests/phase0.test.ts`, mocks UI simulation dans tests renderer.
 
 ## Décisions techniques
 
-- Pas de FK `characters.template_id` → `character_templates` : référence purement
-  informative, suppression sans cascade.
-- `initialState`/`currentState` séparés dès maintenant (pas de refonte à la Phase 3) ;
-  en préparation, édition d'instance réaligne les deux (pas encore de simulation).
-- Colonnes legacy `*_json` conservées en miroir de l'état courant (compatibilité descendante).
-- Index créés **après** les migrations additives (bug legacy corrigé, ne pas régresser).
-- `getDb` réinitialise le singleton si l'ouverture échoue.
-- Génération aléatoire déterministe inchangée ; `generateDraftState(seed)` réutilisé par
-  le bouton « personnalité cohérente » du formulaire.
-- Sandbox dev Linux : contournement `--no-sandbox` isolé à `scripts/dev.mjs` (dev uniquement),
-  `src/main/security/window.ts` inchangé.
-- Suppression d'instance : pas de suppression en cascade ; la suppression est conditionnée
-  aux deux prédicats `id` **et** `world_id` (contrôle d'appartenance avant `DELETE`), afin
-  qu'une manipulation IPC ne puisse pas toucher le personnage d'un autre monde. Le modèle
-  reste intact (référence `template_id` informative, pas de FK). Aucune modification de schéma.
+- **Worker sans SQLite** : le worker ne touche pas la base ; le main reste seul écrivain SQLite. Justification : sql.js/WASM + persistance fichier unique rendent les accès concurrents fragiles ; la frontière main garde la validation, les transactions et la sécurité.
+- **Tick atomique** : une commande/tick = transaction + `persist(db)` unique. Pas d'état partiel.
+- **Reprise** : au démarrage app, `recoverSimulationClocksAfterRestart()` convertit les horloges `running` en `paused`. Pas d'auto-reprise.
+- **`simulation_stopped`** : arrêt volontaire, données conservées. Redémarrage implicite refusé dans cette tranche (`startSimulation` rejette explicitement). Reprise explicite/nouvelle sauvegarde à trancher avant Phase 3B.
+- **`Date.now()` interdit dans les règles** : utilisé uniquement pour `createdAt/updatedAt`.
+- **Compatibilité statuts** : `simulation_started` accepté en lecture, normalisé en `simulation_running`.
+- **Sécurité Electron inchangée** : `contextIsolation`, `sandbox`, `nodeIntegration:false`, `webSecurity:true`, navigation externe refusée, aucun Node exposé au renderer.
 
-## Problèmes rencontrés
+## Validation réalisée
 
-- **Migration legacy** : premier smoke réel sur base existante → « no such column:
-  template_id » (index créé avant l'ALTER). Corrigé + test de non-régression. Leçon :
-  toujours tester la migration sur une base au schéma précédent, pas seulement une base neuve.
-- Linux restreint (AppArmor/userns) : voir `docs/TROUBLESHOOTING.md` (historique, résolu dev-only).
-- Harness smoke B : la première exécution a affiché un faux échec car une valeur numérique
-  (`cardsA`) était incluse dans un `.every(v === true)` ; le harness a été corrigé et la
-  séquence complète A+B rejouée avec succès. Aucun bug applicatif.
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : OK.
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : OK (4 tsconfigs).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **102/102 OK** (10 fichiers).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : OK.
+- **Smoke Electron réel Linux** (CDP, `--no-sandbox --disable-gpu`, 2 lancements) : création monde `SMOKE-SIM` (seed 123, 2 persos), start tick 0 running, pause, step -> 1, speed 10x, fermeture, relance restaurée tick 1/paused/rngState `2246822416`/`simulation_paused`, resume, step -> 2, suppression smoke, `SMOKE_OK`. DB utilisateur sauvegardée puis restaurée depuis `/tmp/dl-worlds-backup.sqlite`.
+
+## Problèmes / points d'attention
+
+- Le smoke test a modifié `data/saves/worlds.sqlite` pendant l'exécution ; la sauvegarde `/tmp/dl-worlds-backup.sqlite` a été restaurée. Vérifier que le DB n'est pas inclus dans le commit (gitignored).
+- `simulation_stopped` ne permet pas de redémarrage implicite : c'est volontaire. Si le produit veut "reprendre un monde arrêté", définir une transition explicite avant de l'implémenter.
+- Le worker est compilé en JS dans `dist/main/simulation/simulation.worker.js` ; `scripts/test.mjs` lance `tsc -p tsconfig.main.json` avant Vitest pour garantir sa présence.
+- Le tick n'applique aucune règle métier. Ne pas présenter la simulation comme autonome.
 
 ## Fichiers importants à examiner
 
-`AGENTS.md`, `PROGRESS.md`, `HANDOFF.md`,
-`docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/RELATIONSHIP_SYSTEM.md`,
-`docs/EVENT_AND_MEMORY_SYSTEM.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`,
-`docs/SIMULATION_ENGINE.md`, `docs/EVENT_SYSTEM.md`, `docs/MEMORY_SYSTEM.md`,
-`docs/DATABASE.md`, `docs/CHARACTER_SYSTEM.md`,
-`src/shared/character.ts`, `src/shared/world.ts`, `src/shared/ipc.ts`,
-`src/main/services/world-store.service.ts`, `src/main/services/prng.ts`,
-`src/main/services/character-validation.service.ts`, `src/main/ipc/character.ipc.ts`,
-`src/preload/preload.ts`.
+- `src/shared/simulation.ts` — contrat clock/statuts/commandes.
+- `src/main/services/prng.ts` — sérialisation/restauration PRNG.
+- `src/main/services/world-store.service.ts` — schéma, migrations, transactions, recovery, commandes simulation.
+- `src/main/services/simulation-manager.service.ts` — worker lifecycle, lock, anti double-tick, broadcast.
+- `src/main/simulation/simulation.worker.ts` — planification ticks/step.
+- `src/main/ipc/simulation.ipc.ts`, `src/preload/preload.ts`, `src/shared/ipc.ts` — contrat IPC.
+- `src/main/main.ts` — recovery startup + shutdown.
+- `src/renderer/components/WorldView.tsx` — UI minimale contrôle simulation.
+- `tests/prng.test.ts`, `tests/simulation.test.ts`, `tests/phase0.test.ts`.
+- `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/DATABASE.md`, `docs/ARCHITECTURE.md`.
 
 ## Commande de relance
 
-Linux : `bash scripts/bootstrap.sh && bash scripts/dev.sh`
-Windows : `.\scripts\bootstrap.ps1` puis `.\scripts\dev.ps1`
-Tests : `bash scripts/test.sh` — Typecheck : Node local + `scripts/typecheck.mjs`.
+```bash
+# Bootstrap
+bash scripts/bootstrap.sh
+
+# Dév
+bash scripts/dev.sh
+
+# Vérifications
+./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs
+./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs
+./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs
+./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs
+```
 
 ## Prochaine tâche recommandée
 
-1. **Valider puis committer/pousser cette tranche documentaire** après vérifications (liens,
-   Mermaid, checks, diff sans secret/généré, `git ls-remote` == HEAD, working tree propre).
-2. Avant toute implémentation Phase 3, trancher les paramètres provisoires du doc temps
-   (durée tick, fréquence 1x, vitesses, snapshots) et concevoir l'API `SeededRng.getState()/setState()`
-   + la table additive `simulation_clock`.
-3. Première implémentation cible (après contrat validé) : squelette worker/simulation main-only,
-   commandes IPC de contrôle, `SimulationClock` persisté, transaction par tick, sans LLM ni
-   relations/événements/mémoires complets. Ne pas implémenter relations/événements/mémoires/mort/LLM
-   avant les phases prévues.
+1. **Finaliser la tranche Git** : vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre.
+2. **Phase 3B (conception puis implémentation prudente)** : définir le contrat du tick métier avant de coder (ordre déterministe, snapshot, transaction par tick, `rngState` avancé pendant tick, pas de `Date.now()` dans règles). Premier scope recommandé : dérive simple besoins/émotions sur tick, sans relations/événements/mémoires/LLM.
+3. **Décision produit à trancher** : politique de reprise d'un monde `simulation_stopped` (nouvelle sauvegarde vs reprise explicite). Ne pas implémenter implicitement.

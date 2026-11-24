@@ -2,6 +2,35 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3A (infrastructure fondamentale du moteur de simulation)
+
+### Added
+- **PRNG sérialisable** : `SeededRng.normalizeSeed()`, `getState(): uint32`, `setState(uint32)` avec validation stricte ; reprise exacte de séquence après restauration. Flux de simulation séparé du flux de génération (`simulationSeed = world.seed ^ 0x85ebca6b`).
+- **Contrats partagés** : `src/shared/simulation.ts` (`SimulationClock`, `SimulationStatusView`, `SimulationSpeed`, statuts, constantes de temps, normalisation legacy `simulation_started` → `simulation_running`).
+- **Persistance SQLite additive** : table `simulation_clock` (`world_id` PK/FK cascade, tick/day/hour/status/speed/rng_state/last_processed_order/created_at/updated_at) + index `idx_simulation_clock_status`. Migration non destructive.
+- **Service simulation main/store** : `start/pause/resume/step/setSpeed/stop/getStatus`, récupération après redémarrage (`running` → `paused`, pas d'auto-reprise), validation des ids/statuts/vitesses, transaction SQLite par commande/tick puis `persist(db)` unique.
+- **Worker de simulation** : `src/main/simulation/simulation.worker.ts` (Node `worker_threads`) gère uniquement la planification/signal `tick/step` ; aucune ouverture SQLite, aucun accès renderer. Communication main↔worker par messages structurés.
+- **Manager main** : `src/main/services/simulation-manager.service.ts` (lifecycle worker, verrou par monde, anti double-tick, sync worker/état, broadcast `simulation:status-changed` vers fenêtres, arrêt propre au quit).
+- **IPC/preload** : canaux `simulation:status/start/pause/resume/step/speed/stop` + événement `simulation:status-changed`, validation main, API preload typée, aucune capacité Node exposée au renderer.
+- **UI minimale WorldView** : panneau « Temps interne » avec statut, jour/heure, tick, vitesse, boutons Démarrer/Pause/Reprendre/Step/Arrêter, vitesses 1x/2x/5x/10x. Statut affiché depuis le main ; boutons de modification personnages désactivés hors préparation.
+- **Tests** : `tests/prng.test.ts`, `tests/simulation.test.ts`, mise à jour `tests/phase0.test.ts` et mocks UI pour le contrat API simulation.
+
+### Changed
+- `worlds.status` étendu additivement : `preparation | simulation_running | simulation_paused | simulation_stopped` ; lecture legacy `simulation_started` normalisée en `simulation_running`. La garde d'édition refuse tout statut non `preparation`.
+- `scripts/test.mjs` compile `tsconfig.main.json` avant Vitest pour garantir la présence du worker JS dans `dist/`.
+- `docs/DATABASE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md` mis à jour.
+
+### Fixed
+- `UseInWorldDialog` : désactivation basée sur `status !== 'preparation'` (compatibilité avec les nouveaux statuts).
+
+### Technical decisions
+- **Tick atomique** : un tick/commande = transaction SQLite + un seul `persist(db)`. Le tick Phase 3A n'altère que l'horloge (aucune évolution de personnages/relations/événements/mémoires/LLM).
+- **Worker sans SQLite** : le worker planifie et émet des signaux ; le main valide, sérialise par monde, écrit en base et diffuse l'état. Évite les accès concurrents sql.js/WASM et garde une frontière de sécurité claire.
+- **Temps logique** : `Date.now()` n'intervient pas dans les règles de simulation ; il sert uniquement aux métadonnées `createdAt/updatedAt`.
+- **Reprise après redémarrage** : les horloges `running` sont récupérées en `paused` au démarrage de l'app ; pas d'auto-reprise.
+- **`simulation_stopped`** : arrêt volontaire, données conservées, pas de redémarrage implicite dans cette tranche (documenté ; reprise explicite/nouvelle sauvegarde à trancher plus tard).
+- **Déterminisme** : PRNG simulation initialisé depuis `world.seed ^ 0x85ebca6b`, état `rng_state` persisté à chaque changement d'horloge ; `setState` refuse les états invalides.
+
 ## 2026-11-24 — Phase 2 (conception du système d'évolution des personnages, documentaire)
 
 ### Added

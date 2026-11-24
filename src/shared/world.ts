@@ -4,7 +4,21 @@
  */
 
 export type WorldGenerationMode = 'empty' | 'random';
-export type WorldStatus = 'preparation' | 'simulation_started';
+
+/**
+ * Statut persistant du monde.
+ * - preparation : paramètres éditables, simulation non démarrée.
+ * - simulation_running : simulation démarrée et active.
+ * - simulation_paused : simulation démarrée, suspendue, reprise possible.
+ * - simulation_stopped : simulation arrêtée volontairement, données conservées.
+ * - simulation_started : alias legacy lu comme simulation_running.
+ */
+export type WorldStatus =
+  | 'preparation'
+  | 'simulation_running'
+  | 'simulation_paused'
+  | 'simulation_stopped'
+  | 'simulation_started';
 
 export interface WorldSummary {
   id: string;

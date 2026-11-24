@@ -3,7 +3,10 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerAppIpc } from './ipc/app.ipc';
 import { registerCharacterIpc } from './ipc/character.ipc';
+import { registerSimulationIpc } from './ipc/simulation.ipc';
 import { registerWorldIpc } from './ipc/world.ipc';
+import { shutdownSimulationManager } from './services/simulation-manager.service';
+import { recoverSimulationClocksAfterRestart } from './services/world-store.service';
 import { isAllowedUrl, WINDOW_SECURITY } from './security/window';
 
 const devUrl = process.env.VITE_DEV_SERVER_URL;
@@ -40,12 +43,22 @@ app.setName('DIGITAL LIFE');
 registerAppIpc();
 registerWorldIpc();
 registerCharacterIpc();
+registerSimulationIpc();
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  try {
+    await recoverSimulationClocksAfterRestart();
+  } catch (error) {
+    console.error('[DIGITAL LIFE] Récupération des horloges de simulation impossible :', error);
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('before-quit', () => {
+  void shutdownSimulationManager();
 });
 
 app.on('window-all-closed', () => {

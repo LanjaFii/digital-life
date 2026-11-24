@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Calendar, CheckCircle2, Dna, Hash, Users, AlertTriangle, RefreshCw, Plus, Library, Pencil, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Calendar, CheckCircle2, Dna, Hash, Pause, Play, RefreshCw, SkipForward, Square, Users, AlertTriangle, Plus, Library, Pencil, Trash2, X, Clock3 } from 'lucide-react';
 import type { Character, CharacterDraft } from '../../shared/character';
+import type { SimulationSpeed, SimulationStatusView } from '../../shared/simulation';
+import { SIMULATION_SPEEDS } from '../../shared/simulation';
 import type { WorldSummary } from '../../shared/world';
 import { CharacterDetail } from './CharacterDetail';
 import { CharacterForm } from './CharacterForm';
@@ -41,6 +43,17 @@ function representativeTraits(character: Character): Array<{ key: string; label:
     .map(([key, value]) => ({ key, label: TRAIT_LABELS[key] ?? key, value }));
 }
 
+function simulationStatusLabel(status: SimulationStatusView['worldStatus']): string {
+  switch (status) {
+    case 'preparation': return 'Préparation';
+    case 'simulation_running':
+    case 'simulation_started': return 'En cours';
+    case 'simulation_paused': return 'En pause';
+    case 'simulation_stopped': return 'Arrêtée';
+    default: return String(status);
+  }
+}
+
 export function WorldView({ worldId, onBackToMenu }: Props) {
   const [world, setWorld] = useState<WorldSummary | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -54,22 +67,27 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [simulation, setSimulation] = useState<SimulationStatusView | null>(null);
+  const [simBusy, setSimBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nextWorld, charsResult] = await Promise.all([
+      const [nextWorld, charsResult, simStatus] = await Promise.all([
         window.digitalLife.getWorld(worldId),
         window.digitalLife.listCharacters(worldId),
+        window.digitalLife.simulationGetStatus(worldId),
       ]);
       setWorld(nextWorld);
       setCharacters(charsResult.characters);
+      setSimulation(simStatus);
       setSelectedCharacterId((current) => (current && charsResult.characters.some((c) => c.id === current) ? current : null));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setWorld(null);
       setCharacters([]);
+      setSimulation(null);
     } finally {
       setLoading(false);
     }
@@ -79,7 +97,33 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const unsubscribe = window.digitalLife.onSimulationStatusChanged((status) => {
+      if (status.worldId !== worldId) return;
+      setSimulation(status);
+      setWorld((current) => (current && current.id === worldId ? { ...current, status: status.worldStatus as WorldSummary['status'] } : current));
+    });
+    return unsubscribe;
+  }, [worldId]);
+
   const selectedCharacter = selectedCharacterId ? characters.find((c) => c.id === selectedCharacterId) ?? null : null;
+  const worldStatus = simulation?.worldStatus ?? world?.status ?? 'preparation';
+  const canEditWorld = worldStatus === 'preparation';
+  const clock = simulation?.clock ?? null;
+
+  const runSimAction = async (action: () => Promise<SimulationStatusView>, success?: string) => {
+    setSimBusy(true);
+    setActionError(null);
+    try {
+      const next = await action();
+      setSimulation(next);
+      if (success) setNotice(success);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSimBusy(false);
+    }
+  };
 
   const handleCreate = async (draft: CharacterDraft, saveAsTemplate: boolean) => {
     await window.digitalLife.createCharacter({ worldId, ...draft, saveAsTemplate });
@@ -177,15 +221,17 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
       <div className="world-view">
         <div className="topbar">
           <button type="button" className="button ghost" onClick={onBackToMenu}><ArrowLeft size={16} /> Menu principal</button>
-          <button type="button" className="button ghost" onClick={() => setEditingCharacter(selectedCharacter)}><Pencil size={15} /> Modifier ce personnage</button>
+          {canEditWorld ? (
+            <button type="button" className="button ghost" onClick={() => setEditingCharacter(selectedCharacter)}><Pencil size={15} /> Modifier ce personnage</button>
+          ) : null}
         </div>
         {banners}
         <CharacterDetail
           character={selectedCharacter}
           onBack={() => setSelectedCharacterId(null)}
-          onDelete={() => setConfirmDeleteCharacter(selectedCharacter)}
+          onDelete={canEditWorld ? () => setConfirmDeleteCharacter(selectedCharacter) : undefined}
         />
-        {editingCharacter ? (
+        {editingCharacter && canEditWorld ? (
           <CharacterForm mode="edit" context="world" title={`Modifier ${editingCharacter.firstName} ${editingCharacter.lastName}`} initialDraft={draftFromCharacter(editingCharacter)} submitLabel="Enregistrer les modifications" onCancel={() => setEditingCharacter(null)} onSubmit={(draft) => handleUpdate(draft)} />
         ) : null}
         {confirmDialog}
@@ -199,8 +245,8 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
         <button type="button" className="button ghost" onClick={onBackToMenu}><ArrowLeft size={16} /> Menu principal</button>
         <div className="inline-actions">
           <button type="button" className="button ghost" onClick={() => void load()}><RefreshCw size={15} /> Actualiser</button>
-          <button type="button" className="button ghost" onClick={() => setShowLibraryPicker(true)}><Library size={15} /> Ajouter depuis ma bibliothèque</button>
-          <button type="button" className="button primary" onClick={() => setShowCreate(true)}><Plus size={15} /> Créer un personnage</button>
+          <button type="button" className="button ghost" onClick={() => setShowLibraryPicker(true)} disabled={!canEditWorld}><Library size={15} /> Ajouter depuis ma bibliothèque</button>
+          <button type="button" className="button primary" onClick={() => setShowCreate(true)} disabled={!canEditWorld}><Plus size={15} /> Créer un personnage</button>
         </div>
       </div>
 
@@ -210,7 +256,11 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
         <div>
           <p className="eyebrow">Monde sauvegardé</p>
           <h2 className="world-title">{world.name}</h2>
-          <p className="subtitle">Monde en préparation : personnages modifiables. Le moteur de simulation n'est pas encore actif.</p>
+          <p className="subtitle">
+            {canEditWorld
+              ? 'Monde en préparation : personnages modifiables. Démarrez la simulation pour faire avancer le temps interne.'
+              : 'Simulation initialisée : les paramètres initiaux des personnages sont verrouillés. Le temps simulé avance selon les commandes.'}
+          </p>
         </div>
         <div className="world-info-grid">
           <div className="info-tile"><span className="info-icon"><Calendar size={15} /></span><div><p className="info-label">Création</p><p className="info-value">{formatDate(world.createdAt)}</p></div></div>
@@ -218,6 +268,70 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
           <div className="info-tile"><span className="info-icon"><Dna size={15} /></span><div><p className="info-label">Génération</p><p className="info-value">{world.generationMode === 'random' ? 'Aléatoire' : 'Vide'}</p></div></div>
           <div className="info-tile"><span className="info-icon"><Users size={15} /></span><div><p className="info-label">Personnages</p><p className="info-value">{characters.length}</p></div></div>
         </div>
+      </section>
+
+      <section className="panel simulation-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Simulation</p>
+            <h2>Temps interne</h2>
+          </div>
+          <span className={`status-chip status-${worldStatus}`}>{simulationStatusLabel(worldStatus)}</span>
+        </div>
+
+        <div className="simulation-grid">
+          <div className="info-tile"><span className="info-icon"><Clock3 size={15} /></span><div><p className="info-label">Jour / Heure</p><p className="info-value">{clock ? `Jour ${clock.day} — ${String(clock.hour).padStart(2, '0')}:00` : 'Non démarrée'}</p></div></div>
+          <div className="info-tile"><span className="info-icon"><Hash size={15} /></span><div><p className="info-label">Tick</p><p className="info-value">{clock ? clock.tick : 0}</p></div></div>
+          <div className="info-tile"><span className="info-icon"><Dna size={15} /></span><div><p className="info-label">Vitesse</p><p className="info-value">{clock ? `${clock.speed}x` : '1x'}</p></div></div>
+        </div>
+
+        <div className="simulation-controls">
+          {worldStatus === 'preparation' ? (
+            <button type="button" className="button primary" disabled={simBusy || characters.length === 0} onClick={() => void runSimAction(() => window.digitalLife.simulationStart(worldId, 1), 'Simulation démarrée.')}>
+              <Play size={15} /> Démarrer la simulation
+            </button>
+          ) : null}
+          {worldStatus === 'simulation_running' ? (
+            <button type="button" className="button ghost" disabled={simBusy} onClick={() => void runSimAction(() => window.digitalLife.simulationPause(worldId), 'Simulation en pause.')}>
+              <Pause size={15} /> Pause
+            </button>
+          ) : null}
+          {worldStatus === 'simulation_paused' ? (
+            <button type="button" className="button primary" disabled={simBusy} onClick={() => void runSimAction(() => window.digitalLife.simulationResume(worldId), 'Simulation reprise.')}>
+              <Play size={15} /> Reprendre
+            </button>
+          ) : null}
+          {(worldStatus === 'simulation_running' || worldStatus === 'simulation_paused') ? (
+            <button type="button" className="button ghost" disabled={simBusy} onClick={() => void runSimAction(() => window.digitalLife.simulationStep(worldId), 'Tick exécuté.')}>
+              <SkipForward size={15} /> Step
+            </button>
+          ) : null}
+          {(worldStatus === 'simulation_running' || worldStatus === 'simulation_paused') ? (
+            <button type="button" className="button danger" disabled={simBusy} onClick={() => void runSimAction(() => window.digitalLife.simulationStop(worldId), 'Simulation arrêtée. Les données sont conservées.')}>
+              <Square size={15} /> Arrêter
+            </button>
+          ) : null}
+          <div className="speed-controls" aria-label="Vitesse de simulation">
+            {SIMULATION_SPEEDS.map((speed) => (
+              <button
+                key={speed}
+                type="button"
+                className={`button ghost speed-button ${clock?.speed === speed ? 'active' : ''}`}
+                disabled={simBusy || !clock || worldStatus === 'simulation_stopped'}
+                onClick={() => void runSimAction(() => window.digitalLife.simulationSetSpeed(worldId, speed as SimulationSpeed))}
+              >
+                {speed}x
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {worldStatus === 'simulation_stopped' ? (
+          <p className="muted-note">Monde arrêté : les données sont conservées. Le redémarrage implicite n'est pas autorisé dans cette tranche ; créez un nouveau monde pour une nouvelle exécution.</p>
+        ) : null}
+        {canEditWorld && characters.length === 0 ? (
+          <p className="muted-note">Ajoutez au moins un personnage avant de démarrer la simulation.</p>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -261,11 +375,13 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
                       ))}
                     </div>
                   </button>
-                  <div className="character-card-actions">
-                    <button type="button" className="button danger" onClick={() => setConfirmDeleteCharacter(character)}>
-                      <Trash2 size={14} /> Supprimer
-                    </button>
-                  </div>
+                  {canEditWorld ? (
+                    <div className="character-card-actions">
+                      <button type="button" className="button danger" onClick={() => setConfirmDeleteCharacter(character)}>
+                        <Trash2 size={14} /> Supprimer
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -273,11 +389,11 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
         )}
       </section>
 
-      {showCreate ? (
+      {showCreate && canEditWorld ? (
         <CharacterForm mode="create" context="world" title="Créer un personnage" submitLabel="Ajouter au monde" onCancel={() => setShowCreate(false)} onSubmit={(draft, saveAsTemplate) => handleCreate(draft, saveAsTemplate)} />
       ) : null}
 
-      {showLibraryPicker ? (
+      {showLibraryPicker && canEditWorld ? (
         <AddFromLibraryDialog worldId={worldId} onClose={() => setShowLibraryPicker(false)} onAdded={() => load()} />
       ) : null}
 

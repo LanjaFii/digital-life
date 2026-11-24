@@ -23,6 +23,20 @@ const api: DigitalLifeApi = {
   updateTemplate: (input) => ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_UPDATE, input),
   deleteTemplate: (id) => ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_DELETE, id),
   instantiateTemplate: (input) => ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_INSTANTIATE, input),
+  simulationGetStatus: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_STATUS, worldId),
+  simulationStart: (worldId, speed) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_START, worldId, speed),
+  simulationPause: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_PAUSE, worldId),
+  simulationResume: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_RESUME, worldId),
+  simulationStep: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_STEP, worldId),
+  simulationSetSpeed: (worldId, speed) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_SPEED, worldId, speed),
+  simulationStop: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_STOP, worldId),
+  onSimulationStatusChanged: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown) => {
+      callback(status as never);
+    };
+    ipcRenderer.on(IPC_CHANNELS.SIMULATION_STATUS_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SIMULATION_STATUS_CHANGED, listener);
+  },
 };
 
 contextBridge.exposeInMainWorld('digitalLife', api);

@@ -1,12 +1,12 @@
 # Base de données
 
-## État réel (Phase 1)
+## État réel (Phase 3A)
 
 Un **fichier SQLite unique** : `data/saves/worlds.sqlite` (sql.js, WASM embarqué dans
 `resources/sqlite/`, aucun CDN). En dev : racine du projet ; en app packagée : `userData`.
 Le fichier est réécrit de façon atomique-en-un-bloc (`db.export()` → `writeFileSync`)
-après chaque mutation. Le renderer n'y accède **jamais** directement : tout passe par
-preload → IPC → main → `world-store.service.ts`.
+après chaque mutation/transaction de simulation validée. Le renderer n'y accède **jamais**
+directement : tout passe par preload → IPC → main → services/store.
 
 > L'ancien concept « un fichier par monde » (`world_001.sqlite`, …) a été abandonné au
 > profit d'une base unique avec isolation par `world_id`. Les sauvegardes par monde
@@ -23,7 +23,7 @@ preload → IPC → main → `world-store.service.ts`.
 | `seed` | INTEGER NOT NULL | PRNG de génération |
 | `character_count` | INTEGER NOT NULL DEFAULT 0 | resynchronisé après chaque ajout/retrait |
 | `generation_mode` | TEXT NOT NULL DEFAULT 'empty' | `empty` \| `random` |
-| `status` | TEXT NOT NULL DEFAULT 'preparation' | `preparation` \| `simulation_started` (futur) |
+| `status` | TEXT NOT NULL DEFAULT 'preparation' | `preparation` \| `simulation_running` \| `simulation_paused` \| `simulation_stopped` (legacy lu : `simulation_started` → `simulation_running`) |
 | `created_at` / `updated_at` | TEXT NOT NULL | ISO 8601 |
 | `last_opened_at` | TEXT | nullable |
 
@@ -64,20 +64,38 @@ Index : `idx_templates_updated_at (updated_at DESC)`.
 `character_templates`** : la suppression d'un modèle remet simplement
 `characters.template_id = NULL` ; les instances survivent intactes.
 
+### `simulation_clock` (Phase 3A)
+
+| Colonne | Type | Notes |
+|---|---|---|
+| `world_id` | TEXT PK | FK → `worlds(id)` **ON DELETE CASCADE** ; une horloge par monde |
+| `tick` | INTEGER NOT NULL DEFAULT 0 | tick logique, 0 au démarrage |
+| `day` | INTEGER NOT NULL DEFAULT 1 | dérivé de tick (`floor(tick/24)+1`) |
+| `hour` | INTEGER NOT NULL DEFAULT 0 | dérivé de tick (`tick % 24`) |
+| `status` | TEXT NOT NULL DEFAULT 'paused' | `running` \| `paused` \| `stopped` |
+| `speed` | INTEGER NOT NULL DEFAULT 1 | 1,2,5,10 (vitesse réelle, pas durée simulée) |
+| `rng_state` | INTEGER NOT NULL | état uint32 mulberry32 du PRNG simulation |
+| `last_processed_order` | INTEGER NOT NULL DEFAULT 0 | ordre traité dans le tick (0 en Phase 3A) |
+| `created_at` / `updated_at` | TEXT NOT NULL | ISO 8601 métadonnées |
+
+Index : `idx_simulation_clock_status (status)`.
+
 ## Migrations additives (non destructives)
 
 À chaque ouverture (`ensureSchema`) :
 
-1. `CREATE TABLE IF NOT EXISTS` pour les trois tables (schéma courant).
+1. `CREATE TABLE IF NOT EXISTS` pour les tables courantes (dont `simulation_clock`).
 2. `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` pour les bases existantes :
-   - `worlds.generation_mode` (tranche précédente), `worlds.status` ;
+   - `worlds.generation_mode`, `worlds.status` ;
    - `characters.template_id`, `updated_at`, `initial_*_json`, `current_*_json`.
 3. Backfill des lignes legacy : `updated_at = created_at`,
    `initial_* = current_* = *_json` existants.
 4. Index créés **après** migration (l'index sur `template_id` nécessite la colonne).
 
 Les anciens mondes/personnages restent consultables et modifiables ; la génération
-aléatoire déterministe est inchangée. Couvert par `tests/character-library.test.ts`
+aléatoire déterministe est inchangée. Les horloges `running` sont récupérées en `paused`
+au démarrage de l'application (pas d'auto-reprise). Couvert par `tests/character-library.test.ts`
+et `tests/simulation.test.ts`.
 (test « Migration additive d'une base Phase 1 existante »).
 
 ## Opérations (service `world-store.service.ts`)

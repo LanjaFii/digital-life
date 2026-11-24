@@ -358,3 +358,21 @@ button, input { font: inherit; }
   .form-grid, .slider-grid, .recap-grid { grid-template-columns: 1fr; }
   .library-picker { grid-template-columns: 1fr; }
 }
+
+/* Simulation panel */
+.simulation-panel { display: grid; gap: 16px; }
+.simulation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.simulation-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.speed-controls { display: inline-flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.speed-button.active { border-color: rgba(255,196,107,0.45); color: var(--gold); background: rgba(255,196,107,0.1); }
+.status-chip { font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); }
+.status-preparation { color: var(--muted); background: rgba(255,255,255,0.04); }
+.status-simulation_running, .status-simulation_started { color: #7de3d4; background: rgba(125,227,212,0.08); border-color: rgba(125,227,212,0.2); }
+.status-simulation_paused { color: var(--gold); background: rgba(255,196,107,0.08); border-color: rgba(255,196,107,0.2); }
+.status-simulation_stopped { color: #ff7a86; background: rgba(255,122,134,0.08); border-color: rgba(255,122,134,0.2); }
+.muted-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+@media (max-width: 800px) {
+  .simulation-grid { grid-template-columns: 1fr; }
+  .speed-controls { margin-left: 0; }
+}

@@ -1,12 +1,38 @@
 /**
  * Générateur pseudo-aléatoire déterministe (mulberry32).
  * Aucun appel à Math.random() : même seed => même séquence.
+ *
+ * L'état interne est sérialisable pour permettre une reprise exacte après
+ * sauvegarde/restauration. `seed` initialise l'état ; `getState()/setState()`
+ * capturent/restaurent le point exact dans la séquence.
  */
 export class SeededRng {
   private state: number;
 
   constructor(seed: number) {
-    this.state = seed >>> 0;
+    this.state = SeededRng.normalizeSeed(seed);
+  }
+
+  /** Normalise une seed en entier non signé 32 bits. */
+  static normalizeSeed(seed: number): number {
+    if (!Number.isFinite(seed)) throw new Error('Seed PRNG invalide.');
+    return Math.trunc(seed) >>> 0;
+  }
+
+  /** État interne exact (uint32), à persister pour reprise déterministe. */
+  getState(): number {
+    return this.state >>> 0;
+  }
+
+  /**
+   * Restaure l'état interne exact. Refuse tout état non entier uint32 pour
+   * éviter une reprise silencieusement corrompue.
+   */
+  setState(state: number): void {
+    if (!Number.isInteger(state) || state < 0 || state > 0xffffffff) {
+      throw new Error('État PRNG invalide : entier uint32 attendu.');
+    }
+    this.state = state >>> 0;
   }
 
   /** Retourne un flottant dans [0, 1). */

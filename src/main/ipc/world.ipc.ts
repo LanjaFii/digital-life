@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/ipc';
 import type { CreateWorldInput } from '../../shared/world';
+import { simulationClearWorld } from '../services/simulation-manager.service';
 import { createWorld, deleteWorld, getWorld, listCharacters, listWorlds } from '../services/world-store.service';
 
 function asCreateInput(value: unknown): CreateWorldInput {
@@ -19,9 +20,11 @@ function asCreateInput(value: unknown): CreateWorldInput {
 export function registerWorldIpc(): void {
   ipcMain.handle(IPC_CHANNELS.WORLD_LIST, () => listWorlds());
   ipcMain.handle(IPC_CHANNELS.WORLD_CREATE, (_event, input: unknown) => createWorld(asCreateInput(input)));
-  ipcMain.handle(IPC_CHANNELS.WORLD_DELETE, (_event, id: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.WORLD_DELETE, async (_event, id: unknown) => {
     if (typeof id !== 'string') throw new Error('Identifiant de monde invalide.');
-    return deleteWorld(id);
+    const result = await deleteWorld(id);
+    await simulationClearWorld(id);
+    return result;
   });
   ipcMain.handle(IPC_CHANNELS.WORLD_GET, (_event, id: unknown) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('Identifiant de monde invalide.');

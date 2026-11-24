@@ -11,6 +11,7 @@ import type {
   UpdateTemplateInput,
 } from './character';
 import type { CreateWorldInput, WorldListResult, WorldSummary } from './world';
+import type { SimulationSpeed, SimulationStatusView } from './simulation';
 
 /**
  * Contrat IPC strict entre le renderer et le processus principal.
@@ -34,6 +35,14 @@ export const IPC_CHANNELS = {
   TEMPLATE_UPDATE: 'template:update',
   TEMPLATE_DELETE: 'template:delete',
   TEMPLATE_INSTANTIATE: 'template:instantiate',
+  SIMULATION_STATUS: 'simulation:status',
+  SIMULATION_START: 'simulation:start',
+  SIMULATION_PAUSE: 'simulation:pause',
+  SIMULATION_RESUME: 'simulation:resume',
+  SIMULATION_STEP: 'simulation:step',
+  SIMULATION_SPEED: 'simulation:speed',
+  SIMULATION_STOP: 'simulation:stop',
+  SIMULATION_STATUS_CHANGED: 'simulation:status-changed',
 } as const;
 
 export interface AppInfo {
@@ -74,4 +83,12 @@ export interface DigitalLifeApi {
   updateTemplate(input: UpdateTemplateInput): Promise<CharacterTemplate>;
   deleteTemplate(id: string): Promise<{ deleted: boolean }>;
   instantiateTemplate(input: InstantiateTemplateInput): Promise<CharacterInstance>;
+  simulationGetStatus(worldId: string): Promise<SimulationStatusView>;
+  simulationStart(worldId: string, speed?: SimulationSpeed): Promise<SimulationStatusView>;
+  simulationPause(worldId: string): Promise<SimulationStatusView>;
+  simulationResume(worldId: string): Promise<SimulationStatusView>;
+  simulationStep(worldId: string): Promise<SimulationStatusView>;
+  simulationSetSpeed(worldId: string, speed: SimulationSpeed): Promise<SimulationStatusView>;
+  simulationStop(worldId: string): Promise<SimulationStatusView>;
+  onSimulationStatusChanged(callback: (status: SimulationStatusView) => void): () => void;
 }

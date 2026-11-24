@@ -52,6 +52,14 @@ describe('Sécurité IPC', () => {
       TEMPLATE_UPDATE: 'template:update',
       TEMPLATE_DELETE: 'template:delete',
       TEMPLATE_INSTANTIATE: 'template:instantiate',
+      SIMULATION_STATUS: 'simulation:status',
+      SIMULATION_START: 'simulation:start',
+      SIMULATION_PAUSE: 'simulation:pause',
+      SIMULATION_RESUME: 'simulation:resume',
+      SIMULATION_STEP: 'simulation:step',
+      SIMULATION_SPEED: 'simulation:speed',
+      SIMULATION_STOP: 'simulation:stop',
+      SIMULATION_STATUS_CHANGED: 'simulation:status-changed',
     });
   });
 
