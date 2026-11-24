@@ -9,9 +9,10 @@
 > [GOAL_SELECTION_SYSTEM.md](GOAL_SELECTION_SYSTEM.md). Les étapes 5 et 10 à 15 restent
 > reportées (aucune mémoire, interaction, relation, événement ni mort implémentée).
 >
-> **Phase 3D [Planifié]** : la consolidation de l'explicabilité, de la persistance et du
-> calcul en worker est décrite dans [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Aucun code
-> n'a été modifié par cette conception.
+> **Phase 3D [3D-A/3D-B implémentées, 3D-C/3D-D planifiées]** : l'historique des décisions,
+> la persistance atomique et les verrous sont livrés ; le calcul en worker et l'inspecteur UI
+> restent décrits dans [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Le calcul reste synchrone
+> dans le main.
 
 ## Principe
 

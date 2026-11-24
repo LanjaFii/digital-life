@@ -1,167 +1,167 @@
-# Refactorisation progressive de `world-store.service.ts` — [Planifié, Phase 3D]
+# Refactorisation progressive de `world-store.service.ts` — Phase 3D-B partielle
 
-> Aucun fichier source n'est modifié par cette tranche documentaire. Le découpage ci-dessous
-> est un plan d'extraction derrière une façade stable, pas une refonte « big bang ».
+> La façade `world-store.service.ts` conserve tous ses imports publics. La
+> tranche 3D-B a extrait la connexion, le schéma, la persistance atomique et le
+> verrou global. Le CRUD et l'écriture du tick restent dans la façade mais ne
+> touchent plus directement au fichier ni à la transaction : ils passent par les
+> nouveaux services. Aucune réécriture générale n'a été tentée.
 
-## 1. Constat vérifié
+## 1. État réel après 3D-B
 
-`src/main/services/world-store.service.ts` contient aujourd'hui, dans un seul fichier :
+`src/main/services/world-store.service.ts` contient toujours :
 
-- le chemin et le cycle de vie de la base sql.js ;
-- `ensureSchema()` et les migrations additives ;
-- `persist()` avec `writeFileSync` ;
 - le CRUD des mondes, personnages et modèles ;
 - l'horloge et les commandes de simulation ;
 - `loadTickSnapshots()`, l'écriture du tick et le hook de test rollback ;
-- la garde `simulation_stopped` ;
-- les helpers de test `_getCharacterJsonColumnsForTests()` et `_setCharacterActionJsonForTests()`.
+- les gardes `simulation_stopped` et `assertWorldPreparation` ;
+- les helpers de test `_...ForTests` exportés par la façade.
 
-Ce fichier est importé directement par `world.ipc.ts`, `character.ipc.ts`, `src/main/main.ts` (pour `recoverSimulationClocksAfterRestart`), `simulation-manager.service.ts` et les tests. `simulation.ipc.ts` l'atteint indirectement via `simulation-manager.service.ts`. Toute extraction doit donc préserver les exports publics.
+Il a en revanche perdu :
+
+- le chemin, le cycle de vie et la restoration de la base sql.js ;
+- `ensureSchema()` et les migrations additives ;
+- `persist()` avec `writeFileSync` ;
+- toute transaction ou mutation sans verrou global.
+
+Ce fichier est importé directement par `world.ipc.ts`, `character.ipc.ts`,
+`src/main/main.ts`, `simulation-manager.service.ts` et les tests. Aucun appelant
+n'a été modifié pour la connexion, le schéma ou la persistance.
 
 ## 2. Principe directeur
 
-`world-store.service.ts` devient une **façade** qui réexporte les fonctions existantes. Les nouveaux modules sont introduits un par un, sans modifier les imports des appelants.
+`world-store.service.ts` reste une **façade** : les modules extraits dépendent
+des services, jamais de la façade. Aucun import circulaire n'est introduit.
 
 ```text
 world-store.service.ts  (façade, exports stables)
- ├── database-connection.service.ts
- ├── database-schema.service.ts
- ├── db-write-lock.service.ts
- ├── persistence.service.ts
- ├── decision-history.store.ts
- ├── world-crud.service.ts
- ├── character-crud.service.ts
- ├── simulation-clock.service.ts
- └── tick-writer.service.ts
+  ├── database-connection.service.ts   ✅ extrait en 3D-B
+  ├── database-schema.service.ts       ✅ extrait en 3D-B
+  ├── db-write-lock.service.ts         ✅ extrait en 3D-B
+  ├── persistence.service.ts           ✅ extrait en 3D-B
+  ├── decision-history.store.ts        ✅ extrait en 3D-A
+  ├── decision-record.service.ts       ✅ extrait en 3D-A
+  ├── world-crud.service.ts            ⏳ reste dans la façade (3D-B : verrouillé)
+  ├── character-crud.service.ts        ⏳ reste dans la façade (3D-B : verrouillé)
+  ├── simulation-clock.service.ts      ⏳ reste dans la façade (3D-B : verrouillé)
+  └── tick-writer.service.ts           ⏳ prévu en 3D-C avec le worker
 ```
 
-Aucun module ne doit importer la façade : les dépendances vont toujours des modules vers les modules, jamais en cercle.
-
-## 3. Responsabilités
+## 3. Responsabilités livrées
 
 ### 3.1 `database-connection.service.ts`
 
 - `getSql()`, `getDb()`, `getDbPath()`, `getDataDir()` ;
 - initialisation WASM via `resource.service.ts` ;
-- `restoreDatabaseFromBuffer()` décrite dans [SAFE_PERSISTENCE.md](SAFE_PERSISTENCE.md) ;
-- `PRAGMA foreign_keys = ON` ;
-- aucun CRUD métier.
+- `snapshotDatabase()`, `snapshotDatabaseFromDisk()` ;
+- `restoreDatabaseFromBuffer()`, `persistSnapshotOrRestore()`,
+  `runDbTransaction()` ;
+- `closeDatabaseForTests()` ;
+- `PRAGMA foreign_keys = ON` ; aucun CRUD métier.
+
+`db.export()` alloue déjà un `Uint8Array` indépendant : aucun second copiage n'est
+effectué. Le cache `lastPersistedBuffer` évite une exportation supplémentaire à
+chaque mutation tout en restant restaurable octet pour octet.
 
 ### 3.2 `database-schema.service.ts`
 
-- `ensureSchema(db)` ;
-- `CREATE TABLE IF NOT EXISTS` ;
-- `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` existants ;
-- backfill legacy existant ;
-- table `schema_migrations` en complément, jamais comme unique source de vérité ;
-- création de `decision_records` en 3D-A. En 3D-A, `ensureSchema()` reste dans la façade et accueille cette table ; le module `database-schema.service.ts` n'est extrait qu'en 3D-B, avec la création de `decision_records` déjà en place.
+- `ensureSchema(db)` extract strict du store ;
+- `CREATE TABLE IF NOT EXISTS`, `PRAGMA table_info`, `ALTER TABLE ADD COLUMN` ;
+- backfill legacy inchangé ;
+- appel à `ensureDecisionHistorySchema(db)` de 3D-A ;
+- aucune migration supplémentaire en 3D-B.
 
 ### 3.3 `db-write-lock.service.ts`
 
-- `withDbWrite<T>()` ;
-- une seule file de promesses globale ;
+- `withDbWrite<T>()` et `DbWriteLockTimeoutError` ;
+- une seule file de promesses globale, timeout 30 s sur l'attente ;
+- libération dans tous les cas, y compris après erreur ;
 - aucun accès à sql.js.
 
 ### 3.4 `persistence.service.ts`
 
-- `atomicPersist(buffer: Uint8Array)` : écrit `beforeBuffer`/`afterBuffer` selon l'appelant ; aucun second helper `persistBuffer` n'est introduit ;
-- chemin temporaire, `fsync`, hash, `rename`, nettoyage au démarrage ;
-- journalisation des erreurs techniques ;
+- `atomicPersist(dbPath, buffer, options?)` ;
+- `getPersistenceTempPath()`, `cleanupStalePersistenceTemp()` ;
+- `AtomicPersistResult.directoryFsyncError` ;
+- hooks de test par étape, injection contrôlée de `fsync` et de plateforme ;
 - aucun CRUD métier.
 
-### 3.5 `decision-history.store.ts`
+### 3.5 Façade : CRUD et tick
 
-- `insertDecisionRecords(db, records)` ;
-- `getDecisionSummaries(db, query)` ;
-- `getDecisionRecord(db, id)` ;
-- parser strict `parseDecisionRecord()` ;
-- aucun calcul de simulation.
+Chaque mutation de la façade suit le même patron :
 
-### 3.6 `world-crud.service.ts`
+```ts
+await withDbWrite(async () => {
+  const db = await getDb();
+  const before = snapshotDatabaseFromDisk();
+  // ... mutations SQL ou runDbTransaction(db, before, () => { ... })
+});
+```
 
-- `createWorld`, `listWorlds`, `getWorld`, `deleteWorld`, `setWorldStatus` ;
-- `getWorld()` continue d'écrire `last_opened_at`, mais via le verrou global.
-
-### 3.7 `character-crud.service.ts`
-
-- `listCharacters`, `createCharacterInWorld`, `updateCharacterInstance`, `deleteCharacterInstance` ;
-- `createTemplate`, `listTemplates`, `getTemplate`, `updateTemplate`, `deleteTemplate`, `instantiateTemplate` ;
-- validation via `character-validation.service.ts` ;
-- garde `assertWorldPreparation` inchangée : tout statut non-`preparation` est refusé.
-
-### 3.8 `simulation-clock.service.ts`
-
-- `getSimulationClockRow`, `clockRowToClock`, `upsertClock`, `deriveDayHour` ;
-- `startSimulation`, `pauseSimulation`, `resumeSimulation`, `setSimulationSpeed`, `stopSimulation` ;
-- `getSimulationStatus`, `recoverSimulationClocksAfterRestart` ;
-- garde `simulation_stopped` inchangée.
-
-### 3.9 `tick-writer.service.ts`
-
-- `loadTickSnapshots(db, worldId)` ;
-- `writeTickCharacterStates(db, states, updatedAt)` ;
-- `writeDecisionRecords(db, records)` ;
-- `applyTick(...)` : transaction courte, `COMMIT`, restauration mémoire en cas d'échec de persistance ;
-- hook `_setTickFailureForTests()` conservé sous le même nom exporté par la façade.
-
-Le calcul pur reste dans `character-tick.service.ts` en 3D-A/B, puis est appelé via le worker en 3D-C. Le tick writer ne décide rien : il reçoit un résultat validé.
+`getWorld()` continue d'écrire `last_opened_at`/`updated_at`, mais sous verrou.
+`stepSimulation()` conserve la transaction 3D-A, l'insertion de l'historique et
+le hook `_setTickFailureForTests()` ; seule l'écriture disque change. Les helpers
+de test restent exportés sous les mêmes noms.
 
 ## 4. Ordre d'extraction
 
-| Étape | Tranche | Extraction | Risque |
+| Étape | Tranche | Extraction | État |
 |---:|---|---|---|
-| 1 | 3D-A | `decision-history.store.ts` (nouveau, aucun déplacement) | faible |
-| 2 | 3D-B | `database-connection.service.ts`, `database-schema.service.ts`, `persistence.service.ts` | moyen |
-| 3 | 3D-B | `db-write-lock.service.ts`, mise sous verrou de toutes les mutations | moyen |
-| 4 | 3D-B | `world-crud.service.ts`, `character-crud.service.ts`, `simulation-clock.service.ts` | faible |
-| 5 | 3D-C | `tick-writer.service.ts`, passage au worker | élevé |
-| 6 | 3D-D | nettoyage de la façade et documentation finale | faible |
+| 1 | 3D-A | `decision-history.store.ts`, `decision-record.service.ts` | livrée |
+| 2 | 3D-B | `database-connection.service.ts`, `database-schema.service.ts`, `persistence.service.ts` | livrée |
+| 3 | 3D-B | `db-write-lock.service.ts`, mise sous verrou de toutes les mutations | livrée |
+| 4 | 3D-B/3D-D | `world-crud.service.ts`, `character-crud.service.ts`, `simulation-clock.service.ts` | reportée : façade stable conservée, mutations déjà verrouillées |
+| 5 | 3D-C | `tick-writer.service.ts`, passage au worker | non commencée |
+| 6 | 3D-D | nettoyage final de la façade et documentation | non commencée |
 
-À chaque étape : diff inspecté, tests existants rejoués, commit séparé si la tranche le permet.
+Le report de l'étape 4 est un choix de réversibilité : déplacer le CRUD aurait
+augmenté le diff sans améliorer la garantie de persistance. La façade expose déjà
+les mêmes exports et tous les appels passent par les services extraits.
 
 ## 5. Façade et compatibilité
 
-La façade conserve tous les exports actuellement consommés :
+Tous les exports publics restent valides, notamment :
 
 ```ts
-export {
-  createWorld, listWorlds, getWorld, deleteWorld,
-  listCharacters, createCharacterInWorld, updateCharacterInstance, deleteCharacterInstance,
-  createTemplate, listTemplates, getTemplate, updateTemplate, deleteTemplate, instantiateTemplate,
-  getSimulationStatus, startSimulation, pauseSimulation, resumeSimulation,
-  stepSimulation, setSimulationSpeed, stopSimulation,
-  getSimulationClock, recoverSimulationClocksAfterRestart,
-  isWorldPreparationStatus,
-  _resetWorldStoreForTests,
-  _getCharacterJsonColumnsForTests,
-  _setCharacterActionJsonForTests,
-  _setTickFailureForTests,
-  _setSimulationClockForTests,
-  _setWorldStatusForTests,
-} from './...';
+createWorld, listWorlds, getWorld, deleteWorld,
+listCharacters, createCharacterInWorld, updateCharacterInstance, deleteCharacterInstance,
+createTemplate, listTemplates, getTemplate, updateTemplate, deleteTemplate, instantiateTemplate,
+getSimulationStatus, getSimulationClock, startSimulation, pauseSimulation, resumeSimulation,
+stepSimulation, setSimulationSpeed, stopSimulation, recoverSimulationClocksAfterRestart,
+isWorldPreparationStatus,
+_resetWorldStoreForTests,
+_getCharacterJsonColumnsForTests, _setCharacterActionJsonForTests,
+_setTickFailureForTests, _setPersistenceFailureForTests,
+_setSimulationClockForTests, _setWorldStatusForTests,
+_insertDecisionRecordForTests, _listDecisionRecordsForTests, _getDecisionRecordForTests,
+_countDecisionRecordsForTests, _getDecisionRecordRowsForTests,
+_exportDatabaseForTests
 ```
 
-Les tests existants qui appellent ces helpers doivent passer sans modification. Les hooks de test restent strictement hors production.
+Les helpers `_...ForTests` restent strictement hors production. Les tests
+existants n'ont pas été modifiés pour s'adapter à la refactorisation.
 
 ## 6. Risques et prévention
 
-| Risque | Prévention |
+| Risque | Prévention vérifiée |
 |---|---|
-| Import circulaire entre façade et modules | Règle : aucun module ne importe la façade. |
-| Comportement `getWorld()` modifié par erreur | Test dédié : `last_opened_at` toujours mis à jour. |
-| Migration legacy cassée | Tests de base Phase 1 et Phase 3C rejoués à chaque extraction. |
-| Verrou oublié sur une mutation | Revue de chaque `persist()` et de chaque `db.run` d'écriture ; test multi-mondes. |
-| Interblocage entre verrous | Ordre unique monde → global, y compris pour la suppression ; test de suppression pendant tick. |
-| Nettoyage de `worldLocks` inefficace | Stocker dans la map la promesse chaînée réellement comparée dans le `finally` ; test de création/suppression répétée. |
-| Historique écrit hors transaction | Test rollback : aucune ligne `decision_records` après échec injecté. |
-| Gros diff difficile à relire | Une responsabilité par commit, façade stable. |
+| Import circulaire | Aucun module extrait n'importe la façade. |
+| `getWorld()` modifié par erreur | `last_opened_at` toujours mis à jour, sous verrou, test existant conservé. |
+| Migration legacy cassée | Tests de base Phase 1/3C et migration `3D-1` rejoués. |
+| Verrou oublié sur une mutation | Revue de chaque ancien site `persist(db)` : tous convertis. |
+| Interblocage | Ordre unique monde → global, y compris suppression ; test dédié. |
+| Nettoyage de `worldLocks` inefficace | Promesse chaînée stockée et comparée ; test de suppression concurrente. |
+| Historique écrit hors transaction | Hook rollback 3D-A inchangé et rejoué. |
+| Gros diff | Quatre modules extraits, façade conservée, CRUD non déplacé. |
 
 ## 7. Critères d'acceptation
 
 - Tous les imports publics existants restent valides.
-- 215 tests Phase 3C passent avant ajout des nouveaux tests.
-- Aucune modification de schéma hors `decision_records` et `schema_migrations` en 3D-A.
-- Aucune modification de règles métier ou de valeurs calculées.
-- Le diff de chaque extraction peut être relu seul.
-- Les helpers de test restent disponibles et non utilisés en production.
-- `world-store.service.ts` ne contient plus, à la fin de la 3D-C, que des réexports et l'orchestration explicite du tick sous verrou.
+- La suite est **264/264** (27 fichiers, benchmark et test long exclus) ; 21 tests 3D-B
+  sont ajoutés et le test long isolé passe **9/9**.
+- Aucun changement de schéma ni de valeur calculée par le moteur.
+- Golden Hash 18 scénarios byte-identique.
+- Aucune mutation de la façade n'échappe à `withDbWrite`.
+- `world-store.service.ts` ne contient plus ni connexion, ni schéma, ni
+  `writeFileSync`.
+- Typecheck 4 configurations et build de production OK ; `worlds.sqlite` utilisateur
+  inchangé.

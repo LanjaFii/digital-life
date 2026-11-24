@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3D-A — historique technique des décisions implémenté** ; Phase 3C reste la dernière tranche complète avant 3D. 3D-B à 3D-D restent à implémenter.
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A/3B/3C implémentées/validées/committées/poussées ; Phase 3D conçue et documentée, **tranche 3D-A implémentée/validée** (historique des décisions). Verrous/persistance (3D-B), worker (3D-C), IPC/UI (3D-D) non implémentés. `forkFromStopped` reste `[Reporté]`.
-- **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant implémentation 3D-A : `e060a07a71cad43932444ae56a00de13d72a1cf0`, identique à `origin/main`, arbre propre.
+- **Phase** : **Phase 3D-B — persistance atomique et verrous implémentée** ; Phase 3C reste la dernière tranche complète avant 3D. 3D-C et 3D-D restent à implémenter.
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A/3B/3C implémentées/validées/committées/poussées ; Phase 3D conçue et documentée, **tranches 3D-A (historique) et 3D-B (persistance/verrous) implémentées/validées**. Worker (3D-C), IPC/UI (3D-D) non implémentés. `forkFromStopped` reste `[Reporté]`.
+- **Dernière mise à jour** : 2026-11-25.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant implémentation 3D-B : `a64d483d46984eeef859cf40cec674575b9ec36c`, identique à `origin/main`, arbre propre.
 
 ## Fonctionnalités terminées
 
@@ -140,12 +140,26 @@
 - [x] Golden Hash : 18 scénarios (6 profils à 720 ticks, 1 à 50 personnages sur 24/72/168/720 ticks) byte-identiques à Phase 3C, avec validation stricte de chaque enregistrement généré.
 - [x] Aucun IPC, preload, renderer, worker, verrou global, LLM ni changement de persistance fichier.
 
+## Implémentation Phase 3D-B (terminée dans cette tranche)
+
+- [x] Audit préalable : HEAD = `origin/main` = `a64d483d46984eeef859cf40cec674575b9ec36c`, sauvegarde hors dépôt vérifiée avant validation (`/home/lanjafii/Backups/Digital-Life-3DB/pre-validation-20261125-013741-final.tar.gz`), aucun processus concurrent.
+- [x] `src/main/services/database-connection.service.ts` : cycle de vie sql.js, WASM, `PRAGMA foreign_keys`, `snapshotDatabaseFromDisk()` (cache du dernier état disque validé), `restoreDatabaseFromBuffer()`, `persistSnapshotOrRestore()`, `runDbTransaction()`, nettoyage du temporaire résiduel à l'ouverture.
+- [x] `src/main/services/database-schema.service.ts` : `ensureSchema()` extrait de la façade, sans changement de schéma ni de migration (3D-1 conservée).
+- [x] `src/main/services/persistence.service.ts` : `atomicPersist()` avec temporaire même répertoire (mode 0600), `writeSync`, `fsyncSync`, vérification taille + SHA-256, `renameSync`, `fsync` du répertoire et `directoryFsyncError` journalisé ; aucun repli par copie partielle ; hooks de panne par étape.
+- [x] `src/main/services/db-write-lock.service.ts` : file globale d'écriture, timeout 30 s sur l'attente, libération après erreur.
+- [x] `src/main/services/world-store.service.ts` : façade et exports publics conservés ; toutes les mutations passent par `withDbWrite()`, `runDbTransaction()` et la persistance atomique ; aucun CRUD déplacé.
+- [x] `src/main/services/simulation-manager.service.ts` : correction du nettoyage de `worldLocks`, timeout 30 s, tombeau `deletedWorldIds`, verrou du monde couvrant tick/sync/broadcast, `simulationDeleteWorld()` ordonné monde → global.
+- [x] `src/main/ipc/world.ipc.ts` : `WORLD_DELETE` passe par `simulationDeleteWorld()` ; aucun canal IPC, preload, renderer, worker, appel LLM, changement de schéma/PRNG/Golden Hash.
+- [x] Tests : 21 nouveaux tests (13 persistance atomique et panne, 3 file globale, 5 manager) ; validation globale **264/264** (27 fichiers, benchmark et test long exclus) ; test long isolé **9/9** en 6,00 s ; typecheck 4 configurations OK ; build de production OK.
+- [x] Documentation mise à jour : `SAFE_PERSISTENCE.md`, `WORLD_STORE_REFACTORING.md`, `DATABASE.md`, `PHASE_3D_DESIGN.md`, `DECISION_HISTORY_SYSTEM.md`, `ARCHITECTURE.md`, `SIMULATION_ENGINE.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
+
 ## Fonctionnalités non commencées
 
 - [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
 - [x] ~~Phase 3C : intégration des services au tick, persistance du runtime, tests SQLite et simulations longues~~ — **terminée (tranche 3)**.
-- [x] ~~Tranche 3D-A : historique technique des décisions~~ — **terminée et validée cette tranche**.
-- [ ] Phase 3D : tranches 3D-B (persistance/verrous), 3D-C (worker de calcul) et 3D-D (IPC/UI) — **conçues, en attente de validation explicite distincte pour chacune**.
+- [x] ~~Tranche 3D-A : historique technique des décisions~~ — **terminée et validée**.
+- [x] ~~Tranche 3D-B : persistance atomique, restauration mémoire et verrous~~ — **terminée et validée cette tranche**.
+- [ ] Phase 3D : tranches 3D-C (worker de calcul) et 3D-D (IPC/UI) — **conçues, en attente de validation explicite distincte pour chacune**.
 - [ ] Phase 3C complémentaire : `forkFromStopped`, hystérésis des objectifs, actions Tier B avec environnement (tous `[Reporté]`).
 - [ ] Phases 4 à 8 : relations, événements canoniques, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
@@ -253,6 +267,16 @@ Ajouts tranche implémentation Phase 3D-A :
 - `tests/decision-history.test.ts`
 - `tests/decision-golden-hash.test.ts`
 
+Ajouts tranche implémentation Phase 3D-B :
+- `src/main/services/database-connection.service.ts`
+- `src/main/services/database-schema.service.ts`
+- `src/main/services/db-write-lock.service.ts`
+- `src/main/services/persistence.service.ts`
+- `tests/atomic-persistence.test.ts`
+- `tests/db-write-lock.test.ts`
+- `tests/simulation-manager-lock.test.ts`
+- `tests/zz-benchmark.tmp.test.ts` (outil local temporaire, exclu des validations et ignoré par Git, jamais lancé pendant la validation finale)
+
 Ajouts tranche implémentation Phase 3C — tranche 2 :
 - `src/main/services/goal-selection.service.ts`
 - `src/main/services/action-candidacy.service.ts`
@@ -287,6 +311,7 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - Tranche implémentation Phase 3C — tranche 3 : `src/main/services/character-tick.service.ts`, `src/main/services/decision-engine.service.ts`, `src/main/services/world-store.service.ts`, `tests/simulation.test.ts`, `tests/simulation-long.test.ts`, `tests/character-tick.test.ts`, `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 - Tranche conception Phase 3D (documentaire) : `docs/DATABASE.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/EVENT_AND_MEMORY_SYSTEM.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`. Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI ni appel LLM modifié.
 - Tranche implémentation Phase 3D-A : `src/shared/action.ts`, `src/shared/decision.ts`, `src/shared/simulation-rules.ts`, `src/main/services/action-runtime.service.ts`, `src/main/services/character-tick.service.ts`, `src/main/services/world-store.service.ts`, `tests/simulation.test.ts` (timeout documenté du test long), `docs/DECISION_HISTORY_SYSTEM.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DATABASE.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- Tranche implémentation Phase 3D-B : `src/main/ipc/world.ipc.ts`, `src/main/services/simulation-manager.service.ts`, `src/main/services/world-store.service.ts`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DATABASE.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/CHARACTER_TICK_RULES.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `.gitignore` (benchmark local ignoré sans suppression).
 
 ## Tests réussis
 
@@ -303,6 +328,7 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - **Validation tranche implémentation Phase 3C — tranche 3** : check-deps OK (via build), typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK. Scénarios SQLite : runtime persistant, rejeu après réouverture, rollback intégral sur runtime corrompu, deux personnages, `current_goals_json` inchangé. Longs : 24/72/168/720/3000 ticks + 6 profils, anti-boucle et bornes vérifiés.
 - **Validation tranche conception Phase 3D (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK. Vérification croisée : 6 nouveaux documents, 4 documents techniques mis à jour, audit indépendant intégré, liens Markdown locaux valides, `git diff --check` OK, aucun fichier applicatif modifié.
 - **Validation tranche implémentation Phase 3D-A** : check-deps OK, typecheck 4 configs OK, tests **252/252 passés** (25 fichiers : 215 existants + 37 nouveaux), build OK. Tests ciblés 37/37 (10 sérialisation, 9 SQLite, 18 Golden Hash). Vérification migration legacy (`schema_migrations` `3D-1`, colonnes et index présents dans le fichier persisté), rollback sans orphelin, conservation après suppression d'instance, cascade monde, doublons rejetés, tailles BLOB mesurées à 10/50/100 personnages. Golden Hash 18 scénarios inchangé. Aucun secret ni fichier généré ajouté, aucun canal IPC/preload/renderer/worker modifié.
+- **Validation tranche implémentation Phase 3D-B** : sauvegarde externe 22/22 fichiers vérifiée avant toute validation ; check-deps OK, typecheck 4 configs OK, tests **264/264 passés** (27 fichiers, benchmark et test long explicitement exclus), test long isolé **9/9** en 6,00 s, build de production OK (2 145 modules). Surveillance : RAM disponible minimale 7 587 MiB, swap 0, RSS max 259 232 KiB, charge max 1,80 pour la suite globale ; test long : RAM min 7 836 MiB, swap 0, RSS max 262 072 KiB, charge max 1,44 ; build : RAM min 7 767 MiB, swap 0, RSS max 255 648 KiB, charge max 0,77. Aucun seuil d'arrêt franchi, aucun processus résiduel. Pannes injectées : fsync refusé, hash altéré, `rename` `EPERM` simulé, échec après rename, restauration mémoire/disque octet pour octet, sérialisation deux mondes, file libérée après erreur et timeout, suppression pendant tick et suppressions concurrentes. `worlds.sqlite` utilisateur intact (24 576 octets, SHA-256 `562c36d1fc672bc47569eef56656a7dd32b5c11b13130ebff8ebad9bf4898182`). Benchmarks locaux non rejoués pendant la validation finale : 3 personnages 63,68 ms au tick 10 / 377,56 ms au tick 200 ; 10 personnages 548,45 ms ; 50 personnages 1 329,12 ms ; 100 personnages 1 652,77 ms ; 3×10 mondes 1 254,09 ms/tick. Aucune mesure 3D-A comparable à effectif égal : ces chiffres ne prouvent pas une amélioration.
 
 ## Tests échoués
 
@@ -322,7 +348,8 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - Bug corrigé : preload sandboxé bundlé Rolldown.
 - Bug corrigé : résolution `app.getAppPath()`/WASM en dev via `ROOT` + fallback `process.cwd()`.
 - Bug corrigé (tranche bibliothèque) : index `template_id` créé avant migration sur bases legacy → « no such column » au smoke réel ; ordre corrigé + test de migration legacy. Le smoke réel sur base existante est indispensable (les tests sur base neuve ne couvraient pas ce cas).
+- **Performance 3D-B** : la durabilité ajoutée (temporaire, double hash, `fsync` fichier/répertoire) coûte plus cher que l'ancien `writeFileSync` direct. `persist()` réexporte toujours toute la base, avec double copie mémoire et double SHA-256 ; `decision_records` croît sans purge, `VACUUM` ni rétention. Le verrou global est détenu pendant le calcul synchrone et la persistance ; il ne doit jamais couvrir un `await` externe en 3D-C. Aucune optimisation opportuniste n'a été appliquée.
 
 ## Prochaine tâche précise
 
-La tranche **3D-A est terminée**. Attendre une validation explicite **distincte** avant de démarrer la tranche **3D-B** (verrou global d'écriture ordonné après le verrou par monde, persistance `temp + fsync + SHA-256 + rename` avec restauration mémoire, suppression de monde sérialisée). Ne pas toucher au worker (3D-C) ni à l'IPC/UI (3D-D) sans validation dédiée. La limitation de performance documentée (`persist()` réexporte toute la base, coût croissant avec l'historique) rend 3D-B recommandée avant toute montée en charge. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.
+La tranche **3D-B est terminée et validée**. Ne pas la recommencer. Attendre une validation explicite **distincte** avant de démarrer la tranche **3D-C** (worker de calcul dédié, protocole versionné, `pendingComputes`, Golden Hash, annulation des requêtes en attente avant de relâcher le verrou du monde). Ne pas toucher à l'IPC/UI (3D-D) sans validation dédiée. La limitation de performance documentée (`persist()` réexporte toute la base, coût croissant avec l'historique) reste ouverte : hash en flux, persistance groupée et rétention de l'historique ne sont pas implémentés. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.

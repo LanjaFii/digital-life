@@ -58,8 +58,8 @@
 - Migrations **additives** et rétrocompatibles ; aucune suppression de colonne, aucun
   `ALTER` destructif ; tester sur une base au schéma précédent (leçon du bug de l'index
   `template_id`).
-- Persistance fiable : `db.export()` + `writeFileSync` après mutation ; aucune perte après
-  redémarrage.
+- Persistance fiable : snapshot restaurable + écriture atomique
+  `temp + fsync + SHA-256 + rename` après mutation (3D-B) ; aucune perte après redémarrage.
 - Aucune décision métier ne dépend du LLM ; le LLM n'enrichira que des dialogues (phase 6).
 - Aucune modification de code/schéma dans cette tranche de conception.
 

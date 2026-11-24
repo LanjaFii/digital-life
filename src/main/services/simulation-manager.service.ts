@@ -9,6 +9,7 @@ import {
   type SimulationStatusView,
 } from '../../shared/simulation';
 import {
+  deleteWorld,
   getSimulationStatus,
   pauseSimulation,
   resumeSimulation,
@@ -37,6 +38,16 @@ let workerReadyPromise: Promise<void> | null = null;
 let resolveWorkerReady: (() => void) | null = null;
 const worldLocks = new Map<string, Promise<void>>();
 const activeTickWorlds = new Set<string>();
+/** Mondes supprimés : aucun tick tardif ne doit plus s'appliquer après suppression. */
+const deletedWorldIds = new Set<string>();
+const WORLD_LOCK_TIMEOUT_MS = 30_000;
+
+export class WorldLockTimeoutError extends Error {
+  constructor(worldId: string) {
+    super(`Timeout après ${WORLD_LOCK_TIMEOUT_MS} ms sur le verrou du monde ${worldId}.`);
+    this.name = 'WorldLockTimeoutError';
+  }
+}
 
 function logSimulationError(context: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
@@ -95,13 +106,23 @@ async function withWorldLock<T>(worldId: string, fn: () => Promise<T>): Promise<
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  worldLocks.set(worldId, previous.then(() => current));
-  await previous;
+  // La map doit stocker exactement la promesse comparée dans le `finally` :
+  // l'ancien code comparait `current` à `previous.then(() => current)`.
+  const chained = previous.then(() => current, () => current);
+  worldLocks.set(worldId, chained);
+
+  let timer: NodeJS.Timeout | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new WorldLockTimeoutError(worldId)), WORLD_LOCK_TIMEOUT_MS);
+  });
+
   try {
+    await Promise.race([previous.then(() => undefined, () => undefined), timeout]);
     return await fn();
   } finally {
+    if (timer) clearTimeout(timer);
     release();
-    if (worldLocks.get(worldId) === current) worldLocks.delete(worldId);
+    if (worldLocks.get(worldId) === chained) worldLocks.delete(worldId);
   }
 }
 
@@ -127,32 +148,53 @@ async function syncWorkerForStatus(status: SimulationStatusView): Promise<void> 
 }
 
 async function handleTick(worldId: string): Promise<void> {
-  if (activeTickWorlds.has(worldId)) return; // anti double-tick
+  if (activeTickWorlds.has(worldId) || deletedWorldIds.has(worldId)) return; // anti double-tick
   activeTickWorlds.add(worldId);
   try {
-    const status = await withWorldLock(worldId, async () => {
+    // Le verrou du monde couvre le tick ET la synchronisation du worker : une
+    // suppression ne peut pas s'intercaler entre le COMMIT et le broadcast.
+    await withWorldLock(worldId, async () => {
+      if (deletedWorldIds.has(worldId)) return;
       const current = await getSimulationStatus(worldId);
-      if (!current.clock) return current;
+      if (!current.clock) return;
       if (normalizeWorldSimulationStatus(current.worldStatus) !== 'simulation_running' || current.clock.status !== 'running') {
-        return current;
+        return;
       }
       const next = await stepSimulation(worldId);
-      return next;
+      if (deletedWorldIds.has(worldId)) return;
+      await syncWorkerForStatus(next);
+      broadcastStatus(next);
     });
-    await syncWorkerForStatus(status);
-    broadcastStatus(status);
   } catch (error) {
     logSimulationError(`tick:${worldId}`, error);
     try {
-      const status = await getSimulationStatus(worldId);
-      await syncWorkerForStatus(status);
-      broadcastStatus(status);
+      if (deletedWorldIds.has(worldId)) return;
+      await withWorldLock(worldId, async () => {
+        const status = await getSimulationStatus(worldId);
+        await syncWorkerForStatus(status);
+        broadcastStatus(status);
+      });
     } catch {
       // Ignore secondary failure.
     }
   } finally {
     activeTickWorlds.delete(worldId);
   }
+}
+
+async function withWorldCommandLock(
+  worldId: string,
+  fn: () => Promise<SimulationStatusView>,
+): Promise<SimulationStatusView> {
+  return withWorldLock(worldId, async () => {
+    if (deletedWorldIds.has(worldId)) throw new Error('Monde supprimé.');
+    const status = await fn();
+    // La synchronisation reste sous le verrou du monde : aucune suppression ne
+    // peut s'intercaler entre la mutation SQLite et la notification de l'UI.
+    await syncWorkerForStatus(status);
+    broadcastStatus(status);
+    return status;
+  });
 }
 
 export async function simulationGetStatus(worldId: string): Promise<SimulationStatusView> {
@@ -164,53 +206,46 @@ export async function simulationGetStatus(worldId: string): Promise<SimulationSt
 
 export async function simulationStart(worldId: string, speed?: unknown): Promise<SimulationStatusView> {
   const safeSpeed: SimulationSpeed = isSimulationSpeed(speed) ? speed : 1;
-  const status = await withWorldLock(worldId, () => startSimulation(worldId, safeSpeed));
-  await syncWorkerForStatus(status);
-  broadcastStatus(status);
-  return status;
+  return withWorldCommandLock(worldId, () => startSimulation(worldId, safeSpeed));
 }
 
 export async function simulationPause(worldId: string): Promise<SimulationStatusView> {
-  const status = await withWorldLock(worldId, () => pauseSimulation(worldId));
-  await syncWorkerForStatus(status);
-  broadcastStatus(status);
-  return status;
+  return withWorldCommandLock(worldId, () => pauseSimulation(worldId));
 }
 
 export async function simulationResume(worldId: string): Promise<SimulationStatusView> {
-  const status = await withWorldLock(worldId, () => resumeSimulation(worldId));
-  await syncWorkerForStatus(status);
-  broadcastStatus(status);
-  return status;
+  return withWorldCommandLock(worldId, () => resumeSimulation(worldId));
 }
 
 export async function simulationStep(worldId: string): Promise<SimulationStatusView> {
-  const status = await withWorldLock(worldId, () => stepSimulation(worldId));
-  await syncWorkerForStatus(status);
-  broadcastStatus(status);
-  return status;
+  return withWorldCommandLock(worldId, () => stepSimulation(worldId));
 }
 
 export async function simulationSetSpeed(worldId: string, speed: unknown): Promise<SimulationStatusView> {
-  const status = await withWorldLock(worldId, () => setSimulationSpeed(worldId, speed));
-  await syncWorkerForStatus(status);
-  broadcastStatus(status);
-  return status;
+  return withWorldCommandLock(worldId, () => setSimulationSpeed(worldId, speed));
 }
 
 export async function simulationStop(worldId: string): Promise<SimulationStatusView> {
-  const status = await withWorldLock(worldId, () => stopSimulation(worldId));
-  await syncWorkerForStatus(status);
-  broadcastStatus(status);
-  return status;
+  return withWorldCommandLock(worldId, () => stopSimulation(worldId));
 }
 
-export async function simulationClearWorld(worldId: string): Promise<void> {
-  if (worker) {
-    try { postToWorker({ type: 'stop', worldId }); } catch { /* ignore */ }
-  }
-  activeTickWorlds.delete(worldId);
-  worldLocks.delete(worldId);
+/**
+ * Suppression orchestrée d'un monde. L'ordre des verrous est strict :
+ * verrou du monde (attend la fin du tick en cours) puis verrou global SQLite
+ * pris par `deleteWorld`. Aucun tick tardif ne peut réécrire le monde supprimé.
+ */
+export async function simulationDeleteWorld(worldId: string): Promise<{ deleted: boolean }> {
+  return withWorldLock(worldId, async () => {
+    // Tombeau permanent : les messages de tick déjà en file sont ignorés.
+    deletedWorldIds.add(worldId);
+    if (worker) {
+      try { postToWorker({ type: 'stop', worldId }); } catch { /* ignore */ }
+    }
+    activeTickWorlds.delete(worldId);
+    const result = await deleteWorld(worldId);
+    activeTickWorlds.delete(worldId);
+    return result;
+  });
 }
 
 export async function shutdownSimulationManager(): Promise<void> {
@@ -223,4 +258,10 @@ export async function shutdownSimulationManager(): Promise<void> {
   resolveWorkerReady = null;
   activeTickWorlds.clear();
   worldLocks.clear();
+}
+
+/** Test uniquement : réinitialise l'état module-level du manager. */
+export async function _resetSimulationManagerForTests(): Promise<void> {
+  await shutdownSimulationManager();
+  deletedWorldIds.clear();
 }

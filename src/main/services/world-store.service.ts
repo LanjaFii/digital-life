@@ -1,7 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { app } from 'electron';
-import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
+import type { Database } from 'sql.js';
 import { randomUUID, randomInt } from 'node:crypto';
 import type {
   CharacterDraft,
@@ -51,12 +48,21 @@ import {
 } from './decision-record.service';
 import { generateCharactersForWorld } from './character-generator.service';
 import { validateCharacterDraft } from './character-validation.service';
-import { getWasmPath } from './resource.service';
 import { parseActionRuntime, serializeActionRuntime } from './action-runtime.service';
 import { DEFAULT_SIMULATION_PARAMETERS } from './simulation-parameters.service';
-
-let sqlPromise: Promise<SqlJsStatic> | null = null;
-let dbPromise: Promise<Database> | null = null;
+import { withDbWrite } from './db-write-lock.service';
+import {
+  closeDatabaseForTests,
+  getDb,
+  persistSnapshotOrRestore,
+  runDbTransaction,
+  snapshotDatabase,
+  snapshotDatabaseFromDisk,
+} from './database-connection.service';
+import {
+  _setPersistenceFailureForTests as setPersistenceFailureHook,
+  type PersistenceFailureHook,
+} from './persistence.service';
 
 /**
  * Hook de test : injecte une erreur après l'écriture des personnages mais avant
@@ -64,189 +70,6 @@ let dbPromise: Promise<Database> | null = null;
  * Jamais utilisé en production (aucun appel hors tests).
  */
 let tickFailureForTests: (() => void) | null = null;
-
-function getDataDir(): string {
-  const base = app.isPackaged ? app.getPath('userData') : app.getAppPath();
-  const dir = join(base, 'data', 'saves');
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function getDbPath(): string {
-  return join(getDataDir(), 'worlds.sqlite');
-}
-
-async function getSql(): Promise<SqlJsStatic> {
-  if (!sqlPromise) {
-    sqlPromise = initSqlJs({
-      locateFile: () => getWasmPath(),
-      useOldExtensionFunctions: false,
-    });
-  }
-  return sqlPromise;
-}
-
-function ensureSchema(db: Database): void {
-  db.run('PRAGMA foreign_keys = ON;');
-  db.run(`
-    CREATE TABLE IF NOT EXISTS worlds (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      seed INTEGER NOT NULL,
-      character_count INTEGER NOT NULL DEFAULT 0,
-      generation_mode TEXT NOT NULL DEFAULT 'empty',
-      status TEXT NOT NULL DEFAULT 'preparation',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      last_opened_at TEXT
-    );
-  `);
-  db.run(`
-    CREATE TABLE IF NOT EXISTS characters (
-      id TEXT PRIMARY KEY,
-      world_id TEXT NOT NULL,
-      template_id TEXT,
-      first_name TEXT NOT NULL,
-      last_name TEXT NOT NULL,
-      age INTEGER NOT NULL,
-      gender TEXT NOT NULL,
-      biography TEXT NOT NULL,
-      traits_json TEXT NOT NULL,
-      emotions_json TEXT NOT NULL,
-      needs_json TEXT NOT NULL,
-      goals_json TEXT NOT NULL,
-      initial_traits_json TEXT,
-      initial_emotions_json TEXT,
-      initial_needs_json TEXT,
-      initial_goals_json TEXT,
-      current_traits_json TEXT,
-      current_emotions_json TEXT,
-      current_needs_json TEXT,
-      current_goals_json TEXT,
-      current_action_json TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (world_id) REFERENCES worlds(id) ON DELETE CASCADE
-    );
-  `);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_characters_world_id ON characters(world_id);`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS character_templates (
-      id TEXT PRIMARY KEY,
-      first_name TEXT NOT NULL,
-      last_name TEXT NOT NULL,
-      age INTEGER NOT NULL,
-      gender TEXT NOT NULL,
-      biography TEXT NOT NULL,
-      traits_json TEXT NOT NULL,
-      emotions_json TEXT NOT NULL,
-      needs_json TEXT NOT NULL,
-      goals_json TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-  `);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_templates_updated_at ON character_templates(updated_at DESC);`);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS simulation_clock (
-      world_id TEXT PRIMARY KEY,
-      tick INTEGER NOT NULL DEFAULT 0,
-      day INTEGER NOT NULL DEFAULT 1,
-      hour INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'paused',
-      speed INTEGER NOT NULL DEFAULT 1,
-      rng_state INTEGER NOT NULL,
-      last_processed_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (world_id) REFERENCES worlds(id) ON DELETE CASCADE
-    );
-  `);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_simulation_clock_status ON simulation_clock(status);`);
-
-  // Migrations additives (bases existantes).
-  const worldColumns = db.exec("PRAGMA table_info(worlds)");
-  const worldNames = new Set((worldColumns[0]?.values ?? []).map((row) => String(row[1])));
-  if (!worldNames.has('generation_mode')) {
-    db.run("ALTER TABLE worlds ADD COLUMN generation_mode TEXT NOT NULL DEFAULT 'empty'");
-  }
-  if (!worldNames.has('status')) {
-    db.run("ALTER TABLE worlds ADD COLUMN status TEXT NOT NULL DEFAULT 'preparation'");
-  }
-
-  const charColumns = db.exec("PRAGMA table_info(characters)");
-  const charNames = new Set((charColumns[0]?.values ?? []).map((row) => String(row[1])));
-  const addCharCol = (name: string, ddl: string) => {
-    if (!charNames.has(name)) db.run(`ALTER TABLE characters ADD COLUMN ${ddl}`);
-  };
-  addCharCol('template_id', 'template_id TEXT');
-  addCharCol('updated_at', 'updated_at TEXT');
-  addCharCol('initial_traits_json', 'initial_traits_json TEXT');
-  addCharCol('initial_emotions_json', 'initial_emotions_json TEXT');
-  addCharCol('initial_needs_json', 'initial_needs_json TEXT');
-  addCharCol('initial_goals_json', 'initial_goals_json TEXT');
-  addCharCol('current_traits_json', 'current_traits_json TEXT');
-  addCharCol('current_emotions_json', 'current_emotions_json TEXT');
-  addCharCol('current_needs_json', 'current_needs_json TEXT');
-  addCharCol('current_goals_json', 'current_goals_json TEXT');
-  addCharCol('current_action_json', 'current_action_json TEXT');
-
-  // Backfill instances existantes : initial/current = valeurs existantes.
-  // Le runtime d'action reçoit explicitement sa valeur par défaut versionnée.
-  db.run(`
-    UPDATE characters
-    SET
-      updated_at = COALESCE(updated_at, created_at),
-      initial_traits_json = COALESCE(initial_traits_json, traits_json),
-      initial_emotions_json = COALESCE(initial_emotions_json, emotions_json),
-      initial_needs_json = COALESCE(initial_needs_json, needs_json),
-      initial_goals_json = COALESCE(initial_goals_json, goals_json),
-      current_traits_json = COALESCE(current_traits_json, traits_json),
-      current_emotions_json = COALESCE(current_emotions_json, emotions_json),
-      current_needs_json = COALESCE(current_needs_json, needs_json),
-      current_goals_json = COALESCE(current_goals_json, goals_json),
-      current_action_json = COALESCE(current_action_json, '${DEFAULT_CHARACTER_ACTION_RUNTIME_JSON}')
-    WHERE
-      updated_at IS NULL OR
-      initial_traits_json IS NULL OR initial_emotions_json IS NULL OR initial_needs_json IS NULL OR initial_goals_json IS NULL OR
-      current_traits_json IS NULL OR current_emotions_json IS NULL OR current_needs_json IS NULL OR current_goals_json IS NULL OR
-      current_action_json IS NULL
-  `);
-
-  // Index sur template_id créé après migration additive (bases existantes sans la colonne).
-  db.run(`CREATE INDEX IF NOT EXISTS idx_characters_template_id ON characters(template_id);`);
-
-  // Phase 3D-A : historique additif. Les migrations existantes restent actives.
-  ensureDecisionHistorySchema(db);
-}
-
-function persist(db: Database): void {
-  const data = db.export();
-  writeFileSync(getDbPath(), Buffer.from(data));
-}
-
-async function getDb(): Promise<Database> {
-  if (!dbPromise) {
-    dbPromise = (async () => {
-      const SQL = await getSql();
-      const dbPath = getDbPath();
-      const db = existsSync(dbPath)
-        ? new SQL.Database(new Uint8Array(readFileSync(dbPath)))
-        : new SQL.Database();
-      ensureSchema(db);
-      persist(db);
-      return db;
-    })().catch((cause) => {
-      // Évite de conserver une promesse rejetée : la prochaine ouverture réessaiera.
-      dbPromise = null;
-      sqlPromise = null;
-      throw cause;
-    });
-  }
-  return dbPromise;
-}
 
 function rowToWorld(row: Record<string, unknown>): WorldSummary {
   const mode = row.generation_mode === 'random' ? 'random' : 'empty';
@@ -341,78 +164,84 @@ export async function listWorlds(): Promise<WorldListResult> {
 }
 
 export async function createWorld(input: CreateWorldInput): Promise<WorldSummary> {
-  const name = input.name?.trim();
-  if (!name) throw new Error('Le nom du monde est obligatoire.');
-  if (name.length > 80) throw new Error('Le nom du monde est trop long (80 caractères max).');
+  return withDbWrite(async () => {
+    const name = input.name?.trim();
+    if (!name) throw new Error('Le nom du monde est obligatoire.');
+    if (name.length > 80) throw new Error('Le nom du monde est trop long (80 caractères max).');
 
-  const generationMode = input.generationMode === 'random' ? 'random' : 'empty';
-  const rawCount = Number.isFinite(input.characterCount) ? Math.floor(input.characterCount!) : 0;
-  const characterCount = generationMode === 'random' ? Math.min(50, Math.max(1, rawCount || 5)) : 0;
-  const seed = Number.isFinite(input.seed) ? Math.floor(input.seed!) : randomInt(0, 2_147_483_647);
-  const now = new Date().toISOString();
-  const world: WorldSummary = {
-    id: randomUUID(),
-    name,
-    seed,
-    characterCount,
-    generationMode,
-    status: 'preparation',
-    createdAt: now,
-    updatedAt: now,
-    lastOpenedAt: null,
-  };
-  const characters =
-    generationMode === 'random' ? generateCharactersForWorld(world.id, world.seed, world.characterCount, now) : [];
+    const generationMode = input.generationMode === 'random' ? 'random' : 'empty';
+    const rawCount = Number.isFinite(input.characterCount) ? Math.floor(input.characterCount!) : 0;
+    const characterCount = generationMode === 'random' ? Math.min(50, Math.max(1, rawCount || 5)) : 0;
+    const seed = Number.isFinite(input.seed) ? Math.floor(input.seed!) : randomInt(0, 2_147_483_647);
+    const now = new Date().toISOString();
+    const world: WorldSummary = {
+      id: randomUUID(),
+      name,
+      seed,
+      characterCount,
+      generationMode,
+      status: 'preparation',
+      createdAt: now,
+      updatedAt: now,
+      lastOpenedAt: null,
+    };
+    const characters =
+      generationMode === 'random' ? generateCharactersForWorld(world.id, world.seed, world.characterCount, now) : [];
 
-  const db = await getDb();
-  // Défensif : éviter doublons si un appel inattendu cible un monde déjà peuplé.
-  const existing = db.prepare('SELECT COUNT(*) AS count FROM characters WHERE world_id = ?');
-  existing.bind([world.id]);
-  const hasExisting = existing.step() && Number(existing.getAsObject().count) > 0;
-  existing.free();
-  if (hasExisting) {
-    throw new Error('Des personnages existent déjà pour ce monde.');
-  }
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    // Défensif : éviter doublons si un appel inattendu cible un monde déjà peuplé.
+    const existing = db.prepare('SELECT COUNT(*) AS count FROM characters WHERE world_id = ?');
+    existing.bind([world.id]);
+    const hasExisting = existing.step() && Number(existing.getAsObject().count) > 0;
+    existing.free();
+    if (hasExisting) {
+      throw new Error('Des personnages existent déjà pour ce monde.');
+    }
 
-  const stmt = db.prepare(`
-    INSERT INTO worlds (id, name, seed, character_count, generation_mode, status, created_at, updated_at, last_opened_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run([
-    world.id,
-    world.name,
-    world.seed,
-    world.characterCount,
-    world.generationMode,
-    world.status,
-    world.createdAt,
-    world.updatedAt,
-    world.lastOpenedAt,
-  ]);
-  stmt.free();
-  if (characters.length > 0) {
-    insertCharacters(db, characters);
-  }
-  persist(db);
-  return world;
+    const stmt = db.prepare(`
+      INSERT INTO worlds (id, name, seed, character_count, generation_mode, status, created_at, updated_at, last_opened_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run([
+      world.id,
+      world.name,
+      world.seed,
+      world.characterCount,
+      world.generationMode,
+      world.status,
+      world.createdAt,
+      world.updatedAt,
+      world.lastOpenedAt,
+    ]);
+    stmt.free();
+    if (characters.length > 0) {
+      insertCharacters(db, characters);
+    }
+    await persistSnapshotOrRestore(db, before);
+    return world;
+  });
 }
 
 export async function getWorld(id: string): Promise<WorldSummary> {
-  if (!id || typeof id !== 'string') throw new Error('Identifiant de monde invalide.');
-  const db = await getDb();
-  const stmt = db.prepare('SELECT * FROM worlds WHERE id = ?');
-  stmt.bind([id]);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
-  if (!row) throw new Error('Monde introuvable.');
+  return withDbWrite(async () => {
+    if (!id || typeof id !== 'string') throw new Error('Identifiant de monde invalide.');
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    const stmt = db.prepare('SELECT * FROM worlds WHERE id = ?');
+    stmt.bind([id]);
+    const row = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    if (!row) throw new Error('Monde introuvable.');
 
-  const now = new Date().toISOString();
-  const update = db.prepare('UPDATE worlds SET last_opened_at = ?, updated_at = ? WHERE id = ?');
-  update.run([now, now, id]);
-  update.free();
-  persist(db);
+    const now = new Date().toISOString();
+    const update = db.prepare('UPDATE worlds SET last_opened_at = ?, updated_at = ? WHERE id = ?');
+    update.run([now, now, id]);
+    update.free();
+    await persistSnapshotOrRestore(db, before);
 
-  return { ...rowToWorld(row), lastOpenedAt: now, updatedAt: now };
+    return { ...rowToWorld(row), lastOpenedAt: now, updatedAt: now };
+  });
 }
 
 export async function listCharacters(worldId: string): Promise<CharacterListResult> {
@@ -429,17 +258,20 @@ export async function listCharacters(worldId: string): Promise<CharacterListResu
 }
 
 export async function deleteWorld(id: string): Promise<{ deleted: boolean }> {
-  if (!id || typeof id !== 'string') throw new Error('Identifiant de monde invalide.');
-  const db = await getDb();
-  const delChars = db.prepare('DELETE FROM characters WHERE world_id = ?');
-  delChars.run([id]);
-  delChars.free();
-  const stmt = db.prepare('DELETE FROM worlds WHERE id = ?');
-  stmt.run([id]);
-  stmt.free();
-  const changes = db.getRowsModified();
-  if (changes > 0) persist(db);
-  return { deleted: changes > 0 };
+  return withDbWrite(async () => {
+    if (!id || typeof id !== 'string') throw new Error('Identifiant de monde invalide.');
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    const delChars = db.prepare('DELETE FROM characters WHERE world_id = ?');
+    delChars.run([id]);
+    delChars.free();
+    const stmt = db.prepare('DELETE FROM worlds WHERE id = ?');
+    stmt.run([id]);
+    stmt.free();
+    const changes = db.getRowsModified();
+    if (changes > 0) await persistSnapshotOrRestore(db, before);
+    return { deleted: changes > 0 };
+  });
 }
 
 function rowToTemplate(row: Record<string, unknown>): CharacterTemplate {
@@ -545,203 +377,221 @@ export async function getTemplate(id: string): Promise<CharacterTemplate> {
 }
 
 export async function createTemplate(input: CreateTemplateInput): Promise<CharacterTemplate> {
-  const draft = validateCharacterDraft(input);
-  const now = new Date().toISOString();
-  const template: CharacterTemplate = { id: randomUUID(), ...draft, createdAt: now, updatedAt: now };
-  const db = await getDb();
-  const stmt = db.prepare(`
-    INSERT INTO character_templates (
-      id, first_name, last_name, age, gender, biography,
-      traits_json, emotions_json, needs_json, goals_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run([
-    template.id, template.firstName, template.lastName, template.age, template.gender, template.biography,
-    JSON.stringify(template.traits), JSON.stringify(template.emotions), JSON.stringify(template.needs), JSON.stringify(template.goals),
-    template.createdAt, template.updatedAt,
-  ]);
-  stmt.free();
-  persist(db);
-  return template;
-}
-
-export async function updateTemplate(input: UpdateTemplateInput): Promise<CharacterTemplate> {
-  if (!input || typeof input !== 'object' || typeof (input as UpdateTemplateInput).id !== 'string') {
-    throw new Error('Identifiant de modèle invalide.');
-  }
-  const id = (input as UpdateTemplateInput).id.trim();
-  if (!id) throw new Error('Identifiant de modèle invalide.');
-  const draft = validateCharacterDraft(input);
-  const db = await getDb();
-  const existing = db.prepare('SELECT * FROM character_templates WHERE id = ?');
-  existing.bind([id]);
-  const row = existing.step() ? existing.getAsObject() : null;
-  existing.free();
-  if (!row) throw new Error('Modèle introuvable.');
-  const createdAt = String(row.created_at);
-  const now = new Date().toISOString();
-  const stmt = db.prepare(`
-    UPDATE character_templates
-    SET first_name=?, last_name=?, age=?, gender=?, biography=?,
-        traits_json=?, emotions_json=?, needs_json=?, goals_json=?, updated_at=?
-    WHERE id = ?
-  `);
-  stmt.run([
-    draft.firstName, draft.lastName, draft.age, draft.gender, draft.biography,
-    JSON.stringify(draft.traits), JSON.stringify(draft.emotions), JSON.stringify(draft.needs), JSON.stringify(draft.goals),
-    now, id,
-  ]);
-  stmt.free();
-  persist(db);
-  return { id, ...draft, createdAt, updatedAt: now };
-}
-
-export async function deleteTemplate(id: string): Promise<{ deleted: boolean }> {
-  if (!id || typeof id !== 'string' || !id.trim()) throw new Error('Identifiant de modèle invalide.');
-  const db = await getDb();
-  const clearRef = db.prepare('UPDATE characters SET template_id = NULL WHERE template_id = ?');
-  clearRef.run([id]);
-  clearRef.free();
-  const stmt = db.prepare('DELETE FROM character_templates WHERE id = ?');
-  stmt.run([id]);
-  stmt.free();
-  const changes = db.getRowsModified();
-  if (changes > 0) persist(db);
-  return { deleted: changes > 0 };
-}
-
-export async function createCharacterInWorld(input: CreateCharacterInWorldInput): Promise<{ character: CharacterInstance; template?: CharacterTemplate }> {
-  if (!input || typeof input !== 'object') throw new Error('Entrée invalide.');
-  const worldId = typeof input.worldId === 'string' ? input.worldId.trim() : '';
-  if (!worldId) throw new Error('Identifiant de monde invalide.');
-  const draft = validateCharacterDraft(input);
-  const saveAsTemplate = input.saveAsTemplate === true;
-  const db = await getDb();
-  assertWorldPreparation(db, worldId);
-
-  const now = new Date().toISOString();
-  let template: CharacterTemplate | undefined;
-  let templateId: string | null = null;
-  if (saveAsTemplate) {
-    template = { id: randomUUID(), ...draft, createdAt: now, updatedAt: now };
-    templateId = template.id;
-    const tStmt = db.prepare(`
+  return withDbWrite(async () => {
+    const draft = validateCharacterDraft(input);
+    const now = new Date().toISOString();
+    const template: CharacterTemplate = { id: randomUUID(), ...draft, createdAt: now, updatedAt: now };
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    const stmt = db.prepare(`
       INSERT INTO character_templates (
         id, first_name, last_name, age, gender, biography,
         traits_json, emotions_json, needs_json, goals_json, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    tStmt.run([
+    stmt.run([
       template.id, template.firstName, template.lastName, template.age, template.gender, template.biography,
       JSON.stringify(template.traits), JSON.stringify(template.emotions), JSON.stringify(template.needs), JSON.stringify(template.goals),
       template.createdAt, template.updatedAt,
     ]);
-    tStmt.free();
-  }
+    stmt.free();
+    await persistSnapshotOrRestore(db, before);
+    return template;
+  });
+}
 
-  const character = buildInstanceFromDraft(draft, worldId, templateId, now);
-  insertCharacters(db, [character]);
-  syncWorldCharacterCount(db, worldId);
-  persist(db);
-  return template ? { character, template } : { character };
+export async function updateTemplate(input: UpdateTemplateInput): Promise<CharacterTemplate> {
+  return withDbWrite(async () => {
+    if (!input || typeof input !== 'object' || typeof (input as UpdateTemplateInput).id !== 'string') {
+      throw new Error('Identifiant de modèle invalide.');
+    }
+    const id = (input as UpdateTemplateInput).id.trim();
+    if (!id) throw new Error('Identifiant de modèle invalide.');
+    const draft = validateCharacterDraft(input);
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    const existing = db.prepare('SELECT * FROM character_templates WHERE id = ?');
+    existing.bind([id]);
+    const row = existing.step() ? existing.getAsObject() : null;
+    existing.free();
+    if (!row) throw new Error('Modèle introuvable.');
+    const createdAt = String(row.created_at);
+    const now = new Date().toISOString();
+    const stmt = db.prepare(`
+      UPDATE character_templates
+      SET first_name=?, last_name=?, age=?, gender=?, biography=?,
+          traits_json=?, emotions_json=?, needs_json=?, goals_json=?, updated_at=?
+      WHERE id = ?
+    `);
+    stmt.run([
+      draft.firstName, draft.lastName, draft.age, draft.gender, draft.biography,
+      JSON.stringify(draft.traits), JSON.stringify(draft.emotions), JSON.stringify(draft.needs), JSON.stringify(draft.goals),
+      now, id,
+    ]);
+    stmt.free();
+    await persistSnapshotOrRestore(db, before);
+    return { id, ...draft, createdAt, updatedAt: now };
+  });
+}
+
+export async function deleteTemplate(id: string): Promise<{ deleted: boolean }> {
+  return withDbWrite(async () => {
+    if (!id || typeof id !== 'string' || !id.trim()) throw new Error('Identifiant de modèle invalide.');
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    const clearRef = db.prepare('UPDATE characters SET template_id = NULL WHERE template_id = ?');
+    clearRef.run([id]);
+    clearRef.free();
+    const stmt = db.prepare('DELETE FROM character_templates WHERE id = ?');
+    stmt.run([id]);
+    stmt.free();
+    const changes = db.getRowsModified();
+    if (changes > 0) await persistSnapshotOrRestore(db, before);
+    return { deleted: changes > 0 };
+  });
+}
+
+export async function createCharacterInWorld(input: CreateCharacterInWorldInput): Promise<{ character: CharacterInstance; template?: CharacterTemplate }> {
+  return withDbWrite(async () => {
+    if (!input || typeof input !== 'object') throw new Error('Entrée invalide.');
+    const worldId = typeof input.worldId === 'string' ? input.worldId.trim() : '';
+    if (!worldId) throw new Error('Identifiant de monde invalide.');
+    const draft = validateCharacterDraft(input);
+    const saveAsTemplate = input.saveAsTemplate === true;
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    assertWorldPreparation(db, worldId);
+
+    const now = new Date().toISOString();
+    let template: CharacterTemplate | undefined;
+    let templateId: string | null = null;
+    if (saveAsTemplate) {
+      template = { id: randomUUID(), ...draft, createdAt: now, updatedAt: now };
+      templateId = template.id;
+      const tStmt = db.prepare(`
+        INSERT INTO character_templates (
+          id, first_name, last_name, age, gender, biography,
+          traits_json, emotions_json, needs_json, goals_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      tStmt.run([
+        template.id, template.firstName, template.lastName, template.age, template.gender, template.biography,
+        JSON.stringify(template.traits), JSON.stringify(template.emotions), JSON.stringify(template.needs), JSON.stringify(template.goals),
+        template.createdAt, template.updatedAt,
+      ]);
+      tStmt.free();
+    }
+
+    const character = buildInstanceFromDraft(draft, worldId, templateId, now);
+    insertCharacters(db, [character]);
+    syncWorldCharacterCount(db, worldId);
+    await persistSnapshotOrRestore(db, before);
+    return template ? { character, template } : { character };
+  });
 }
 
 export async function instantiateTemplate(input: InstantiateTemplateInput): Promise<CharacterInstance> {
-  if (!input || typeof input !== 'object') throw new Error('Entrée invalide.');
-  const templateId = typeof input.templateId === 'string' ? input.templateId.trim() : '';
-  const worldId = typeof input.worldId === 'string' ? input.worldId.trim() : '';
-  if (!templateId) throw new Error('Identifiant de modèle invalide.');
-  if (!worldId) throw new Error('Identifiant de monde invalide.');
-  const db = await getDb();
-  assertWorldPreparation(db, worldId);
+  return withDbWrite(async () => {
+    if (!input || typeof input !== 'object') throw new Error('Entrée invalide.');
+    const templateId = typeof input.templateId === 'string' ? input.templateId.trim() : '';
+    const worldId = typeof input.worldId === 'string' ? input.worldId.trim() : '';
+    if (!templateId) throw new Error('Identifiant de modèle invalide.');
+    if (!worldId) throw new Error('Identifiant de monde invalide.');
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    assertWorldPreparation(db, worldId);
 
-  const tStmt = db.prepare('SELECT * FROM character_templates WHERE id = ?');
-  tStmt.bind([templateId]);
-  const row = tStmt.step() ? tStmt.getAsObject() : null;
-  tStmt.free();
-  if (!row) throw new Error('Modèle introuvable.');
-  const template = rowToTemplate(row);
+    const tStmt = db.prepare('SELECT * FROM character_templates WHERE id = ?');
+    tStmt.bind([templateId]);
+    const row = tStmt.step() ? tStmt.getAsObject() : null;
+    tStmt.free();
+    if (!row) throw new Error('Modèle introuvable.');
+    const template = rowToTemplate(row);
 
-  const now = new Date().toISOString();
-  const draft: CharacterDraft = {
-    firstName: template.firstName,
-    lastName: template.lastName,
-    age: template.age,
-    gender: template.gender,
-    biography: template.biography,
-    traits: { ...template.traits },
-    emotions: { ...template.emotions },
-    needs: { ...template.needs },
-    goals: template.goals.map((g) => ({ ...g, id: randomUUID() })),
-  };
-  const character = buildInstanceFromDraft(draft, worldId, template.id, now);
-  insertCharacters(db, [character]);
-  syncWorldCharacterCount(db, worldId);
-  persist(db);
-  return character;
+    const now = new Date().toISOString();
+    const draft: CharacterDraft = {
+      firstName: template.firstName,
+      lastName: template.lastName,
+      age: template.age,
+      gender: template.gender,
+      biography: template.biography,
+      traits: { ...template.traits },
+      emotions: { ...template.emotions },
+      needs: { ...template.needs },
+      goals: template.goals.map((g) => ({ ...g, id: randomUUID() })),
+    };
+    const character = buildInstanceFromDraft(draft, worldId, template.id, now);
+    insertCharacters(db, [character]);
+    syncWorldCharacterCount(db, worldId);
+    await persistSnapshotOrRestore(db, before);
+    return character;
+  });
 }
 
 export async function updateCharacterInstance(input: UpdateCharacterInstanceInput): Promise<CharacterInstance> {
-  if (!input || typeof input !== 'object') throw new Error('Entrée invalide.');
-  const id = typeof input.id === 'string' ? input.id.trim() : '';
-  const worldId = typeof input.worldId === 'string' ? input.worldId.trim() : '';
-  if (!id) throw new Error('Identifiant de personnage invalide.');
-  if (!worldId) throw new Error('Identifiant de monde invalide.');
-  const draft = validateCharacterDraft(input);
-  const db = await getDb();
-  assertWorldPreparation(db, worldId);
+  return withDbWrite(async () => {
+    if (!input || typeof input !== 'object') throw new Error('Entrée invalide.');
+    const id = typeof input.id === 'string' ? input.id.trim() : '';
+    const worldId = typeof input.worldId === 'string' ? input.worldId.trim() : '';
+    if (!id) throw new Error('Identifiant de personnage invalide.');
+    if (!worldId) throw new Error('Identifiant de monde invalide.');
+    const draft = validateCharacterDraft(input);
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    assertWorldPreparation(db, worldId);
 
-  const existingStmt = db.prepare('SELECT * FROM characters WHERE id = ? AND world_id = ?');
-  existingStmt.bind([id, worldId]);
-  const row = existingStmt.step() ? existingStmt.getAsObject() : null;
-  existingStmt.free();
-  if (!row) throw new Error('Personnage introuvable.');
+    const existingStmt = db.prepare('SELECT * FROM characters WHERE id = ? AND world_id = ?');
+    existingStmt.bind([id, worldId]);
+    const row = existingStmt.step() ? existingStmt.getAsObject() : null;
+    existingStmt.free();
+    if (!row) throw new Error('Personnage introuvable.');
 
-  const now = new Date().toISOString();
-  const createdAt = String(row.created_at);
-  const templateId = row.template_id == null ? null : String(row.template_id);
-  const initialTraitsJson = JSON.stringify(draft.traits);
-  const initialEmotionsJson = JSON.stringify(draft.emotions);
-  const initialNeedsJson = JSON.stringify(draft.needs);
-  const initialGoalsJson = JSON.stringify(draft.goals);
-  const currentTraitsJson = initialTraitsJson;
-  const currentEmotionsJson = initialEmotionsJson;
-  const currentNeedsJson = initialNeedsJson;
-  const currentGoalsJson = initialGoalsJson;
+    const now = new Date().toISOString();
+    const createdAt = String(row.created_at);
+    const templateId = row.template_id == null ? null : String(row.template_id);
+    const initialTraitsJson = JSON.stringify(draft.traits);
+    const initialEmotionsJson = JSON.stringify(draft.emotions);
+    const initialNeedsJson = JSON.stringify(draft.needs);
+    const initialGoalsJson = JSON.stringify(draft.goals);
+    const currentTraitsJson = initialTraitsJson;
+    const currentEmotionsJson = initialEmotionsJson;
+    const currentNeedsJson = initialNeedsJson;
+    const currentGoalsJson = initialGoalsJson;
 
-  const stmt = db.prepare(`
-    UPDATE characters
-    SET first_name=?, last_name=?, age=?, gender=?, biography=?,
-        traits_json=?, emotions_json=?, needs_json=?, goals_json=?,
-        initial_traits_json=?, initial_emotions_json=?, initial_needs_json=?, initial_goals_json=?,
-        current_traits_json=?, current_emotions_json=?, current_needs_json=?, current_goals_json=?,
-        updated_at=?
-    WHERE id = ? AND world_id = ?
-  `);
-  stmt.run([
-    draft.firstName, draft.lastName, draft.age, draft.gender, draft.biography,
-    currentTraitsJson, currentEmotionsJson, currentNeedsJson, currentGoalsJson,
-    initialTraitsJson, initialEmotionsJson, initialNeedsJson, initialGoalsJson,
-    currentTraitsJson, currentEmotionsJson, currentNeedsJson, currentGoalsJson,
-    now, id, worldId,
-  ]);
-  stmt.free();
-  persist(db);
+    const stmt = db.prepare(`
+      UPDATE characters
+      SET first_name=?, last_name=?, age=?, gender=?, biography=?,
+          traits_json=?, emotions_json=?, needs_json=?, goals_json=?,
+          initial_traits_json=?, initial_emotions_json=?, initial_needs_json=?, initial_goals_json=?,
+          current_traits_json=?, current_emotions_json=?, current_needs_json=?, current_goals_json=?,
+          updated_at=?
+      WHERE id = ? AND world_id = ?
+    `);
+    stmt.run([
+      draft.firstName, draft.lastName, draft.age, draft.gender, draft.biography,
+      currentTraitsJson, currentEmotionsJson, currentNeedsJson, currentGoalsJson,
+      initialTraitsJson, initialEmotionsJson, initialNeedsJson, initialGoalsJson,
+      currentTraitsJson, currentEmotionsJson, currentNeedsJson, currentGoalsJson,
+      now, id, worldId,
+    ]);
+    stmt.free();
+    await persistSnapshotOrRestore(db, before);
 
-  return {
-    id,
-    worldId,
-    templateId,
-    firstName: draft.firstName,
-    lastName: draft.lastName,
-    age: draft.age,
-    gender: draft.gender,
-    biography: draft.biography,
-    initialState: { traits: { ...draft.traits }, emotions: { ...draft.emotions }, needs: { ...draft.needs }, goals: draft.goals.map((g) => ({ ...g })) },
-    currentState: { traits: { ...draft.traits }, emotions: { ...draft.emotions }, needs: { ...draft.needs }, goals: draft.goals.map((g) => ({ ...g })) },
-    createdAt,
-    updatedAt: now,
-  };
+    return {
+      id,
+      worldId,
+      templateId,
+      firstName: draft.firstName,
+      lastName: draft.lastName,
+      age: draft.age,
+      gender: draft.gender,
+      biography: draft.biography,
+      initialState: { traits: { ...draft.traits }, emotions: { ...draft.emotions }, needs: { ...draft.needs }, goals: draft.goals.map((g) => ({ ...g })) },
+      currentState: { traits: { ...draft.traits }, emotions: { ...draft.emotions }, needs: { ...draft.needs }, goals: draft.goals.map((g) => ({ ...g })) },
+      createdAt,
+      updatedAt: now,
+    };
+  });
 }
 
 /**
@@ -750,38 +600,38 @@ export async function updateCharacterInstance(input: UpdateCharacterInstanceInpu
  * l'appartenance réelle du personnage au monde. Le modèle d'origine n'est jamais touché.
  */
 export async function deleteCharacterInstance(id: string, worldId: string): Promise<{ deleted: boolean }> {
-  const characterId = typeof id === 'string' ? id.trim() : '';
-  const targetWorldId = typeof worldId === 'string' ? worldId.trim() : '';
-  if (!characterId) throw new Error('Identifiant de personnage invalide.');
-  if (!targetWorldId) throw new Error('Identifiant de monde invalide.');
+  return withDbWrite(async () => {
+    const characterId = typeof id === 'string' ? id.trim() : '';
+    const targetWorldId = typeof worldId === 'string' ? worldId.trim() : '';
+    if (!characterId) throw new Error('Identifiant de personnage invalide.');
+    if (!targetWorldId) throw new Error('Identifiant de monde invalide.');
 
-  const db = await getDb();
-  assertWorldPreparation(db, targetWorldId);
+    const db = await getDb();
+    const before = snapshotDatabaseFromDisk();
+    assertWorldPreparation(db, targetWorldId);
 
-  // Vérification d'appartenance avant suppression : un id valide d'un autre monde
-  // ne doit jamais permettre de supprimer quoi que ce soit.
-  const existing = db.prepare('SELECT id FROM characters WHERE id = ? AND world_id = ?');
-  existing.bind([characterId, targetWorldId]);
-  const found = existing.step();
-  existing.free();
-  if (!found) throw new Error('Personnage introuvable dans ce monde.');
+    // Vérification d'appartenance avant suppression : un id valide d'un autre monde
+    // ne doit jamais permettre de supprimer quoi que ce soit.
+    const existing = db.prepare('SELECT id FROM characters WHERE id = ? AND world_id = ?');
+    existing.bind([characterId, targetWorldId]);
+    const found = existing.step();
+    existing.free();
+    if (!found) throw new Error('Personnage introuvable dans ce monde.');
 
-  const del = db.prepare('DELETE FROM characters WHERE id = ? AND world_id = ?');
-  del.run([characterId, targetWorldId]);
-  del.free();
-  syncWorldCharacterCount(db, targetWorldId);
-  persist(db);
-  return { deleted: true };
+    const del = db.prepare('DELETE FROM characters WHERE id = ? AND world_id = ?');
+    del.run([characterId, targetWorldId]);
+    del.free();
+    syncWorldCharacterCount(db, targetWorldId);
+    await persistSnapshotOrRestore(db, before);
+    return { deleted: true };
+  });
 }
 
 /** Test/utilitaire : réinitialise le singleton (ferme la DB en mémoire). */
 export async function _resetWorldStoreForTests(): Promise<void> {
-  if (dbPromise) {
-    const db = await dbPromise.catch(() => null);
-    db?.close();
-  }
-  dbPromise = null;
-  sqlPromise = null;
+  tickFailureForTests = null;
+  setPersistenceFailureHook(null);
+  await closeDatabaseForTests();
 }
 
 /** Test : lit les colonnes JSON brutes d'un personnage (audit Phase 3C). */
@@ -812,11 +662,14 @@ export async function _setCharacterActionJsonForTests(
   characterId: string,
   value: string,
 ): Promise<void> {
-  const db = await getDb();
-  const stmt = db.prepare('UPDATE characters SET current_action_json = ? WHERE id = ? AND world_id = ?');
-  stmt.run([value, characterId, assertValidWorldId(worldId)]);
-  stmt.free();
-  persist(db);
+  await withDbWrite(async () => {
+      const db = await getDb();
+      const before = snapshotDatabaseFromDisk();
+      const stmt = db.prepare('UPDATE characters SET current_action_json = ? WHERE id = ? AND world_id = ?');
+      stmt.run([value, characterId, assertValidWorldId(worldId)]);
+      stmt.free();
+      await persistSnapshotOrRestore(db, before);
+  });
 }
 
 function assertValidWorldId(worldId: string): string {
@@ -934,29 +787,26 @@ function setWorldStatus(db: Database, worldId: string, status: 'simulation_runni
 }
 
 export async function recoverSimulationClocksAfterRestart(): Promise<void> {
-  const db = await getDb();
-  const now = new Date().toISOString();
-  const stmt = db.prepare(`SELECT world_id, status, speed, rng_state, tick, day, hour, last_processed_order, created_at, updated_at
-    FROM simulation_clock WHERE status = 'running'`);
-  const toPause: string[] = [];
-  while (stmt.step()) toPause.push(String(stmt.getAsObject().world_id));
-  stmt.free();
-  if (toPause.length === 0) return;
-  db.run('BEGIN TRANSACTION;');
-  try {
-    for (const worldId of toPause) {
-      const row = getSimulationClockRow(db, worldId);
-      if (!row) continue;
-      const prev = clockRowToClock(row);
-      upsertClock(db, { ...prev, status: 'paused', updatedAt: now });
-      setWorldStatus(db, worldId, 'simulation_paused', now);
-    }
-    db.run('COMMIT;');
-    persist(db);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+  await withDbWrite(async () => {
+      const db = await getDb();
+      const now = new Date().toISOString();
+      const stmt = db.prepare(`SELECT world_id, status, speed, rng_state, tick, day, hour, last_processed_order, created_at, updated_at
+        FROM simulation_clock WHERE status = 'running'`);
+      const toPause: string[] = [];
+      while (stmt.step()) toPause.push(String(stmt.getAsObject().world_id));
+      stmt.free();
+      if (toPause.length === 0) return;
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        for (const worldId of toPause) {
+          const row = getSimulationClockRow(db, worldId);
+          if (!row) continue;
+          const prev = clockRowToClock(row);
+          upsertClock(db, { ...prev, status: 'paused', updatedAt: now });
+          setWorldStatus(db, worldId, 'simulation_paused', now);
+        }
+      });
+  });
 }
 
 export async function getSimulationStatus(worldId: string): Promise<SimulationStatusView> {
@@ -974,144 +824,129 @@ export async function getSimulationStatus(worldId: string): Promise<SimulationSt
 }
 
 export async function startSimulation(worldId: string, speed: unknown = 1): Promise<SimulationStatusView> {
-  const id = assertValidWorldId(worldId);
-  const normalizedSpeed = normalizeSpeed(speed);
-  const db = await getDb();
-  const world = getWorldOrThrow(db, id);
-  const status = normalizeWorldSimulationStatus(world.status);
-  if (status === 'simulation_running') throw new Error('La simulation est déjà démarrée.');
-  if (world.characterCount <= 0) throw new Error('Impossible de démarrer une simulation sans personnage.');
-  if (status === 'simulation_stopped') {
-    throw new Error('Un monde arrêté ne peut pas être redémarré implicitement ; créez une nouvelle sauvegarde ou une reprise explicite documentée.');
-  }
+  return withDbWrite(async () => {
+      const id = assertValidWorldId(worldId);
+      const normalizedSpeed = normalizeSpeed(speed);
+      const db = await getDb();
+      const world = getWorldOrThrow(db, id);
+      const status = normalizeWorldSimulationStatus(world.status);
+      if (status === 'simulation_running') throw new Error('La simulation est déjà démarrée.');
+      if (world.characterCount <= 0) throw new Error('Impossible de démarrer une simulation sans personnage.');
+      if (status === 'simulation_stopped') {
+        throw new Error('Un monde arrêté ne peut pas être redémarré implicitement ; créez une nouvelle sauvegarde ou une reprise explicite documentée.');
+      }
 
-  const existing = getSimulationClockRow(db, id);
-  const now = new Date().toISOString();
-  db.run('BEGIN TRANSACTION;');
-  try {
-    let clock: SimulationClock;
-    if (!existing) {
-      if (status !== 'preparation') throw new Error('État de monde incohérent : horloge absente.');
-      const rngState = simulationSeed(world.seed);
-      clock = {
-        worldId: id,
-        tick: 0,
-        day: 1,
-        hour: 0,
-        status: 'running',
-        speed: normalizedSpeed,
-        rngState,
-        lastProcessedOrder: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
-    } else {
-      const prev = clockRowToClock(existing);
-      if (status !== 'simulation_paused') throw new Error('Transition de démarrage invalide pour ce monde.');
-      clock = { ...prev, status: 'running', speed: normalizedSpeed, updatedAt: now };
-    }
-    upsertClock(db, clock);
-    setWorldStatus(db, id, 'simulation_running', now);
-    db.run('COMMIT;');
-    persist(db);
-    return getSimulationStatus(id);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+      const existing = getSimulationClockRow(db, id);
+      const now = new Date().toISOString();
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        let clock: SimulationClock;
+        if (!existing) {
+          if (status !== 'preparation') throw new Error('État de monde incohérent : horloge absente.');
+          const rngState = simulationSeed(world.seed);
+          clock = {
+            worldId: id,
+            tick: 0,
+            day: 1,
+            hour: 0,
+            status: 'running',
+            speed: normalizedSpeed,
+            rngState,
+            lastProcessedOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          };
+        } else {
+          const prev = clockRowToClock(existing);
+          if (status !== 'simulation_paused') throw new Error('Transition de démarrage invalide pour ce monde.');
+          clock = { ...prev, status: 'running', speed: normalizedSpeed, updatedAt: now };
+        }
+        upsertClock(db, clock);
+        setWorldStatus(db, id, 'simulation_running', now);
+      });
+      return getSimulationStatus(id);
+  });
 }
 
 export async function pauseSimulation(worldId: string): Promise<SimulationStatusView> {
-  const id = assertValidWorldId(worldId);
-  const db = await getDb();
-  const world = getWorldOrThrow(db, id);
-  const status = normalizeWorldSimulationStatus(world.status);
-  const clockRow = getSimulationClockRow(db, id);
-  if (status !== 'simulation_running' || !clockRow) {
-    throw new Error('Seule une simulation en cours peut être mise en pause.');
-  }
-  const prev = clockRowToClock(clockRow);
-  const now = new Date().toISOString();
-  db.run('BEGIN TRANSACTION;');
-  try {
-    upsertClock(db, { ...prev, status: 'paused', updatedAt: now });
-    setWorldStatus(db, id, 'simulation_paused', now);
-    db.run('COMMIT;');
-    persist(db);
-    return getSimulationStatus(id);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+  return withDbWrite(async () => {
+      const id = assertValidWorldId(worldId);
+      const db = await getDb();
+      const world = getWorldOrThrow(db, id);
+      const status = normalizeWorldSimulationStatus(world.status);
+      const clockRow = getSimulationClockRow(db, id);
+      if (status !== 'simulation_running' || !clockRow) {
+        throw new Error('Seule une simulation en cours peut être mise en pause.');
+      }
+      const prev = clockRowToClock(clockRow);
+      const now = new Date().toISOString();
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        upsertClock(db, { ...prev, status: 'paused', updatedAt: now });
+        setWorldStatus(db, id, 'simulation_paused', now);
+      });
+      return getSimulationStatus(id);
+  });
 }
 
 export async function resumeSimulation(worldId: string): Promise<SimulationStatusView> {
-  const id = assertValidWorldId(worldId);
-  const db = await getDb();
-  const world = getWorldOrThrow(db, id);
-  const status = normalizeWorldSimulationStatus(world.status);
-  const clockRow = getSimulationClockRow(db, id);
-  if (status !== 'simulation_paused' || !clockRow) {
-    throw new Error('Seule une simulation en pause peut être reprise.');
-  }
-  const prev = clockRowToClock(clockRow);
-  const now = new Date().toISOString();
-  db.run('BEGIN TRANSACTION;');
-  try {
-    upsertClock(db, { ...prev, status: 'running', updatedAt: now });
-    setWorldStatus(db, id, 'simulation_running', now);
-    db.run('COMMIT;');
-    persist(db);
-    return getSimulationStatus(id);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+  return withDbWrite(async () => {
+      const id = assertValidWorldId(worldId);
+      const db = await getDb();
+      const world = getWorldOrThrow(db, id);
+      const status = normalizeWorldSimulationStatus(world.status);
+      const clockRow = getSimulationClockRow(db, id);
+      if (status !== 'simulation_paused' || !clockRow) {
+        throw new Error('Seule une simulation en pause peut être reprise.');
+      }
+      const prev = clockRowToClock(clockRow);
+      const now = new Date().toISOString();
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        upsertClock(db, { ...prev, status: 'running', updatedAt: now });
+        setWorldStatus(db, id, 'simulation_running', now);
+      });
+      return getSimulationStatus(id);
+  });
 }
 
 export async function stopSimulation(worldId: string): Promise<SimulationStatusView> {
-  const id = assertValidWorldId(worldId);
-  const db = await getDb();
-  const world = getWorldOrThrow(db, id);
-  const status = normalizeWorldSimulationStatus(world.status);
-  const clockRow = getSimulationClockRow(db, id);
-  if (!clockRow || (status !== 'simulation_running' && status !== 'simulation_paused')) {
-    throw new Error('Seule une simulation démarrée peut être arrêtée.');
-  }
-  const prev = clockRowToClock(clockRow);
-  const now = new Date().toISOString();
-  db.run('BEGIN TRANSACTION;');
-  try {
-    upsertClock(db, { ...prev, status: 'stopped', updatedAt: now });
-    setWorldStatus(db, id, 'simulation_stopped', now);
-    db.run('COMMIT;');
-    persist(db);
-    return getSimulationStatus(id);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+  return withDbWrite(async () => {
+      const id = assertValidWorldId(worldId);
+      const db = await getDb();
+      const world = getWorldOrThrow(db, id);
+      const status = normalizeWorldSimulationStatus(world.status);
+      const clockRow = getSimulationClockRow(db, id);
+      if (!clockRow || (status !== 'simulation_running' && status !== 'simulation_paused')) {
+        throw new Error('Seule une simulation démarrée peut être arrêtée.');
+      }
+      const prev = clockRowToClock(clockRow);
+      const now = new Date().toISOString();
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        upsertClock(db, { ...prev, status: 'stopped', updatedAt: now });
+        setWorldStatus(db, id, 'simulation_stopped', now);
+      });
+      return getSimulationStatus(id);
+  });
 }
 
 export async function setSimulationSpeed(worldId: string, speed: unknown): Promise<SimulationStatusView> {
-  const id = assertValidWorldId(worldId);
-  const normalizedSpeed = normalizeSpeed(speed);
-  const db = await getDb();
-  getWorldOrThrow(db, id);
-  const clockRow = getSimulationClockRow(db, id);
-  if (!clockRow) throw new Error('Aucune horloge de simulation pour ce monde.');
-  const prev = clockRowToClock(clockRow);
-  const now = new Date().toISOString();
-  db.run('BEGIN TRANSACTION;');
-  try {
-    upsertClock(db, { ...prev, speed: normalizedSpeed, updatedAt: now });
-    db.run('COMMIT;');
-    persist(db);
-    return getSimulationStatus(id);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+  return withDbWrite(async () => {
+      const id = assertValidWorldId(worldId);
+      const normalizedSpeed = normalizeSpeed(speed);
+      const db = await getDb();
+      getWorldOrThrow(db, id);
+      const clockRow = getSimulationClockRow(db, id);
+      if (!clockRow) throw new Error('Aucune horloge de simulation pour ce monde.');
+      const prev = clockRowToClock(clockRow);
+      const now = new Date().toISOString();
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        upsertClock(db, { ...prev, speed: normalizedSpeed, updatedAt: now });
+      });
+      return getSimulationStatus(id);
+  });
 }
 
 /**
@@ -1219,85 +1054,84 @@ function writeTickCharacterStates(
 /**
  * Applique exactement un tick : évolution passive, décisions autonomes, effets
  * d'action, runtime et avance de l'horloge dans une seule transaction SQLite et
- * un seul `persist`. Le PRNG n'est consommé qu'en cas d'ex æquo réel. Aucun
- * effet partiel en cas d'erreur.
+ * une seule persistance atomique. Le PRNG n'est consommé qu'en cas d'ex æquo
+ * réel. Aucun effet partiel en cas d'erreur.
  */
 export async function stepSimulation(worldId: string): Promise<SimulationStatusView> {
-  const id = assertValidWorldId(worldId);
-  const db = await getDb();
-  // Validations d'entrée avant ouverture de la transaction (aucune mutation).
-  const world = getWorldOrThrow(db, id);
-  const status = normalizeWorldSimulationStatus(world.status);
-  const preflightClock = getSimulationClockRow(db, id);
-  if (!preflightClock || (status !== 'simulation_running' && status !== 'simulation_paused')) {
-    throw new Error('La simulation doit être démarrée pour exécuter un tick.');
-  }
+  return withDbWrite(async () => {
+      const id = assertValidWorldId(worldId);
+      const db = await getDb();
+      // Validations d'entrée avant ouverture de la transaction (aucune mutation).
+      const world = getWorldOrThrow(db, id);
+      const status = normalizeWorldSimulationStatus(world.status);
+      const preflightClock = getSimulationClockRow(db, id);
+      if (!preflightClock || (status !== 'simulation_running' && status !== 'simulation_paused')) {
+        throw new Error('La simulation doit être démarrée pour exécuter un tick.');
+      }
 
-  // Protocole : BEGIN avant tout chargement cohérent de l'état du tick.
-  db.run('BEGIN TRANSACTION;');
-  try {
-    const clockRow = getSimulationClockRow(db, id);
-    if (!clockRow) throw new Error('Horloge de simulation introuvable pendant le tick.');
-    const prev = clockRowToClock(clockRow);
-    const { snapshots, actionRuntimeByCharacter, characterNameByCharacterId } = loadTickSnapshots(db, id);
-    const nextTick = prev.tick + 1;
-    const { day, hour } = deriveDayHour(nextTick);
+      // Snapshot avant mutation : restauration mémoire exacte si le disque échoue.
+      const before = snapshotDatabaseFromDisk();
 
-    // Calcul purement mémoire : aucun état n'est modifié avant cette étape.
-    const result = computeCharacterTick({
-      worldId: id,
-      tick: nextTick,
-      day,
-      hour,
-      seed: simulationSeed(world.seed),
-      rngState: prev.rngState,
-      characters: snapshots,
-      params: DEFAULT_SIMULATION_PARAMETERS,
-      actionRuntimeByCharacter,
-      characterNameByCharacterId,
-    });
+      // Protocole : BEGIN avant tout chargement cohérent de l'état du tick.
+      await runDbTransaction(db, before, () => {
+        const clockRow = getSimulationClockRow(db, id);
+        if (!clockRow) throw new Error('Horloge de simulation introuvable pendant le tick.');
+        const prev = clockRowToClock(clockRow);
+        const { snapshots, actionRuntimeByCharacter, characterNameByCharacterId } = loadTickSnapshots(db, id);
+        const nextTick = prev.tick + 1;
+        const { day, hour } = deriveDayHour(nextTick);
 
-    const runtimes = new Map(result.actionRuntimeStates.map((entry) => [entry.characterId, entry.runtime]));
-    if (runtimes.size !== result.characterStates.length) {
-      throw new Error('Nombre de runtimes d’action incohérent avec les états calculés.');
-    }
-    const states = result.characterStates.map((state) => {
-      const runtime = runtimes.get(state.characterId);
-      if (!runtime) throw new Error(`Runtime d’action manquant pour ${state.characterId}.`);
-      return { ...state, runtime };
-    });
+        // Calcul purement mémoire : aucun état n'est modifié avant cette étape.
+        const result = computeCharacterTick({
+          worldId: id,
+          tick: nextTick,
+          day,
+          hour,
+          seed: simulationSeed(world.seed),
+          rngState: prev.rngState,
+          characters: snapshots,
+          params: DEFAULT_SIMULATION_PARAMETERS,
+          actionRuntimeByCharacter,
+          characterNameByCharacterId,
+        });
 
-    assertDecisionRecordsMatchTick(result.decisionRecords, states);
+        const runtimes = new Map(result.actionRuntimeStates.map((entry) => [entry.characterId, entry.runtime]));
+        if (runtimes.size !== result.characterStates.length) {
+          throw new Error('Nombre de runtimes d’action incohérent avec les états calculés.');
+        }
+        const states = result.characterStates.map((state) => {
+          const runtime = runtimes.get(state.characterId);
+          if (!runtime) throw new Error(`Runtime d’action manquant pour ${state.characterId}.`);
+          return { ...state, runtime };
+        });
 
-    const now = new Date().toISOString();
-    writeTickCharacterStates(db, states, now);
-    const inserted = insertDecisionRecords(db, result.decisionRecords, now);
-    if (inserted !== states.length) {
-      throw new Error('Écriture incomplète de l’historique des décisions.');
-    }
+        assertDecisionRecordsMatchTick(result.decisionRecords, states);
 
-    if (tickFailureForTests) tickFailureForTests();
+        const now = new Date().toISOString();
+        writeTickCharacterStates(db, states, now);
+        const inserted = insertDecisionRecords(db, result.decisionRecords, now);
+        if (inserted !== states.length) {
+          throw new Error('Écriture incomplète de l’historique des décisions.');
+        }
 
-    upsertClock(db, {
-      ...prev,
-      tick: nextTick,
-      day,
-      hour,
-      // step en pause conserve la pause ; step en running conserve running
-      status: prev.status,
-      // État exact après au plus un tirage par personnage (ex æquo uniquement).
-      rngState: result.rngState >>> 0,
-      lastProcessedOrder: 0,
-      updatedAt: now,
-    });
-    setWorldStatus(db, id, prev.status === 'running' ? 'simulation_running' : 'simulation_paused', now);
-    db.run('COMMIT;');
-    persist(db);
-    return getSimulationStatus(id);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+        if (tickFailureForTests) tickFailureForTests();
+
+        upsertClock(db, {
+          ...prev,
+          tick: nextTick,
+          day,
+          hour,
+          // step en pause conserve la pause ; step en running conserve running
+          status: prev.status,
+          // État exact après au plus un tirage par personnage (ex æquo uniquement).
+          rngState: result.rngState >>> 0,
+          lastProcessedOrder: 0,
+          updatedAt: now,
+        });
+        setWorldStatus(db, id, prev.status === 'running' ? 'simulation_running' : 'simulation_paused', now);
+      });
+      return getSimulationStatus(id);
+  });
 }
 
 /** Test uniquement : injecte une panne avant l'écriture de l'horloge. */
@@ -1307,24 +1141,21 @@ export function _setTickFailureForTests(hook: (() => void) | null): void {
 
 /** Test/utilitaire : force l'horloge pour des scénarios déterministes. */
 export async function _setSimulationClockForTests(worldId: string, clock: Partial<SimulationClock>): Promise<void> {
-  const id = assertValidWorldId(worldId);
-  const db = await getDb();
-  const existing = getSimulationClockRow(db, id);
-  if (!existing) throw new Error('Horloge de simulation introuvable.');
-  const prev = clockRowToClock(existing);
-  const next: SimulationClock = { ...prev, ...clock, worldId: id, updatedAt: new Date().toISOString() };
-  const { day, hour } = deriveDayHour(next.tick);
-  next.day = day;
-  next.hour = hour;
-  db.run('BEGIN TRANSACTION;');
-  try {
-    upsertClock(db, next);
-    db.run('COMMIT;');
-    persist(db);
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+  await withDbWrite(async () => {
+      const id = assertValidWorldId(worldId);
+      const db = await getDb();
+      const existing = getSimulationClockRow(db, id);
+      if (!existing) throw new Error('Horloge de simulation introuvable.');
+      const prev = clockRowToClock(existing);
+      const next: SimulationClock = { ...prev, ...clock, worldId: id, updatedAt: new Date().toISOString() };
+      const { day, hour } = deriveDayHour(next.tick);
+      next.day = day;
+      next.hour = hour;
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        upsertClock(db, next);
+      });
+  });
 }
 
 /** Test : force le statut d'un monde pour vérifier le verrouillage futur. */
@@ -1332,11 +1163,14 @@ export async function _setWorldStatusForTests(
   worldId: string,
   status: 'preparation' | 'simulation_running' | 'simulation_paused' | 'simulation_stopped' | 'simulation_started',
 ): Promise<void> {
-  const db = await getDb();
-  const stmt = db.prepare('UPDATE worlds SET status = ? WHERE id = ?');
-  stmt.run([normalizeWorldSimulationStatus(status), worldId]);
-  stmt.free();
-  persist(db);
+  await withDbWrite(async () => {
+      const db = await getDb();
+      const before = snapshotDatabaseFromDisk();
+      const stmt = db.prepare('UPDATE worlds SET status = ? WHERE id = ?');
+      stmt.run([normalizeWorldSimulationStatus(status), worldId]);
+      stmt.free();
+      await persistSnapshotOrRestore(db, before);
+  });
 }
 
 /** Test : insère directement une charge utile d'historique. */
@@ -1344,18 +1178,15 @@ export async function _insertDecisionRecordForTests(
   payload: DecisionRecordPayloadV1,
   createdAt = new Date().toISOString(),
 ): Promise<DecisionRecordV1> {
-  const db = await getDb();
-  const record = finalizeDecisionRecord(payload, createdAt);
-  db.run('BEGIN TRANSACTION;');
-  try {
-    insertDecisionRecords(db, [payload], createdAt);
-    db.run('COMMIT;');
-    persist(db);
-    return record;
-  } catch (error) {
-    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
-    throw error;
-  }
+  return withDbWrite(async () => {
+      const db = await getDb();
+      const record = finalizeDecisionRecord(payload, createdAt);
+      const before = snapshotDatabaseFromDisk();
+      await runDbTransaction(db, before, () => {
+        insertDecisionRecords(db, [payload], createdAt);
+      });
+      return record;
+  });
 }
 
 /** Test : lit les enregistrements décodés et validés. */
@@ -1384,4 +1215,14 @@ export async function _getDecisionRecordRowsForTests(
 ): Promise<ReturnType<typeof getDecisionRecordRows>> {
   const db = await getDb();
   return getDecisionRecordRows(db, worldId);
+}
+
+/** Test uniquement : injecte une panne à une étape de l'écriture atomique. */
+export function _setPersistenceFailureForTests(hook: PersistenceFailureHook | null): void {
+  setPersistenceFailureHook(hook);
+}
+
+/** Test uniquement : exporte l'état mémoire pour comparaison octet pour octet. */
+export async function _exportDatabaseForTests(): Promise<Uint8Array> {
+  return snapshotDatabase(await getDb());
 }

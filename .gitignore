@@ -33,6 +33,9 @@ data/settings/*
 *.p12
 *.pfx
 
+# Benchmark local temporaire (jamais versions, jamais lance pendant les validations)
+tests/zz-benchmark.tmp.test.ts
+
 # Logs / caches / OS / IDE
 *.log
 npm-debug.log*

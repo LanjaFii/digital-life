@@ -1,7 +1,7 @@
 # Phase 3D — Consolidation du moteur
 
-> **Statut : conception validée. La tranche 3D-A est implémentée et validée ; 3D-B à 3D-D
-> restent planifiées et exigent une validation distincte.** HEAD avant conception 3D :
+> **Statut : conception validée. Les tranches 3D-A et 3D-B sont implémentées et validées ;
+> 3D-C et 3D-D restent planifiées et exigent une validation distincte.** HEAD avant conception 3D :
 > `276384eb993e91f80a309e0864a54dbe1fdf8d53`, identique à `origin/main`. HEAD après
 > publication de la conception : `e060a07a71cad43932444ae56a00de13d72a1cf0`.
 > Ce document sert de référence d'architecture pour les tranches 3D-A à 3D-D.
@@ -35,7 +35,7 @@ Les vérifications directes dans le code imposent plusieurs corrections à la re
 | Refactorisation | Découper en plusieurs services dans la même tranche que le worker | **Façade `world-store.service.ts` conservée, modules extraits tranche par tranche** | IPC, tests et manager importent actuellement cette façade ; un big bang casserait la compatibilité. |
 | UI | Afficher l'historique immédiatement | **UI en dernière tranche**, avec throttle et abonnement limité | Le renderer met déjà à jour statut et horloge via `simulation:status-changed`, mais ne recharge ni les personnages ni l'historique. Le throttle 500 ms ne s'applique qu'à ces rechargements. |
 | `getWorld()` | Considéré comme lecture | **Écriture réelle de `last_opened_at` + `updated_at` + `persist()`** | Toute opération dite « lecture » peut écrire ; le verrou global doit donc couvrir ce chemin. |
-| Verrous | Verrou global seul | **Ordre de verrou unique : verrou du monde puis verrou global d'écriture** | Le manager DETIENT déjà le verrou par monde autour des commandes/ticks. Inverser l'ordre pour la suppression créerait un risque d'interblocage. Le nettoyage actuel de `worldLocks` compare une promesse chaînée et ne supprime donc pas l'entrée : à corriger en 3D-B. |
+| Verrous | Verrou global seul | **Ordre de verrou unique : verrou du monde puis verrou global d'écriture** | Le manager DETIENT déjà le verrou par monde autour des commandes/ticks. Inverser l'ordre pour la suppression créerait un risque d'interblocage. Le nettoyage de `worldLocks` comparait une promesse chaînée et ne supprimait pas l'entrée : corrigé en 3D-B. |
 | Erreurs worker | « Remonter à l'IPC » | **Step manuel : rejet IPC. Tick automatique : journalisation main, aucun état écrit, statut inchangé** | Un signal du planificateur n'a pas d'appelant IPC à qui renvoyer une erreur. |
 
 Aucune suppression de champ ou de contrat n'est proposée dans cette phase. Les champs actuellement sans effet ou non interprétés sont **conservés** : `CharacterTickInput.seed`, `maxRngDrawsPerCharacterTick`, `caps.healthLoss`, `lastProcessedOrder` (validé et persisté, mais non utilisé par les règles), les `goals` de `GoalSelectionInput` (lus mais dont le libellé n'est pas interprété) et les messages `start`/`step` du worker (implémentés mais jamais envoyés par le manager). `world.seed` et `projectedEmotions` sont déjà utilisés dans le code réel et ne sont pas concernés par cette liste. Toute activation ou tout retrait fera l'objet d'une décision séparée et justifiée.
@@ -83,8 +83,8 @@ Références détaillées :
 
 | Tranche | Objectif | Dépendances | Critère d'acceptation principal |
 |---|---|---|---|
-| **3D-A** | Historique des décisions : contrat `DecisionRecordV1`, table `decision_records`, écriture dans le tick actuel, validation stricte, tests | Phase 3C | Une ligne par personnage et par tick, écrite dans la même transaction que l'état ; rollback sans orphelin ; anciennes sauvegardes lisibles. **Validée, en implémentation.** |
-| **3D-B** | Persistance sécurisée, verrou global d'écriture, refactorisation de la connexion et du schéma | 3D-A | Aucune écriture concurrente ; échec de `persist()` sans divergence mémoire/disque ; suppression de monde sérialisée. |
+| **3D-A** | Historique des décisions : contrat `DecisionRecordV1`, table `decision_records`, écriture dans le tick actuel, validation stricte, tests | Phase 3C | Une ligne par personnage et par tick, écrite dans la même transaction que l'état ; rollback sans orphelin ; anciennes sauvegardes lisibles. **Livrée et validée.** |
+| **3D-B** | Persistance sécurisée, verrou global d'écriture, refactorisation de la connexion et du schéma | 3D-A | Aucune écriture concurrente ; échec de `persist()` sans divergence mémoire/disque ; suppression de monde sérialisée. **Livrée et validée.** |
 | **3D-C** | Worker de calcul dédié, protocole, validation, Golden Hash | 3D-B | Résultats byte-identiques entre calcul direct et calcul worker sur plusieurs seeds, profils et effectifs. |
 | **3D-D** | IPC de lecture, UI minimale, rafraîchissement, documentation finale | 3D-C | Aucun accès Node dans le renderer ; filtres bornés ; aucun tick ne déclenche un flux IPC non limité. |
 
@@ -106,15 +106,15 @@ Chaque tranche est autonome : tests, documentation, validation séquentielle (`c
 ### 4.2 Tranche 3D-B — Persistance et verrous
 
 - **Objectif** : rendre la persistance atomique au niveau fichier et réversible en mémoire, puis sérialiser toutes les écritures.
-- **Périmètre** : export avant mutation, transaction courte, `temp + fsync + hash + rename`, restauration mémoire, verrou global, correction du nettoyage de `worldLocks`, suppression de monde atomique.
-- **Fichiers prévus** : `database-connection.service.ts`, `database-schema.service.ts`, `persistence.service.ts`, `db-write-lock.service.ts`, `world-crud.service.ts`, `character-crud.service.ts`, `simulation-clock.service.ts`, `world-store.service.ts`, `world.ipc.ts`, `simulation-manager.service.ts`, tests.
+- **Périmètre livré** : export avant mutation, transaction courte, `temp + fsync + hash + rename`, restauration mémoire, verrou global, correction du nettoyage de `worldLocks`, suppression de monde atomique. Le CRUD reste dans la façade, déjà verrouillée.
+- **Fichiers livrés** : `database-connection.service.ts`, `database-schema.service.ts`, `persistence.service.ts`, `db-write-lock.service.ts`, `world-store.service.ts`, `world.ipc.ts`, `simulation-manager.service.ts`, tests. Les modules `world-crud.service.ts`, `character-crud.service.ts` et `simulation-clock.service.ts` restent reportés pour préserver la façade.
 - **SQLite** : aucun changement de schéma ; migration `3D-1` déjà posée en 3D-A.
-- **Contrats/services** : `withDbWrite<T>()`, `atomicPersist(buffer)`, `restoreDatabaseFromBuffer()`, `simulationDeleteWorld()`.
+- **Contrats/services** : `withDbWrite<T>()`, `atomicPersist(path, buffer)`, `restoreDatabaseFromBuffer()`, `simulationDeleteWorld()`.
 - **Dépendances** : 3D-A.
-- **Tests** : échec avant/après `COMMIT`, hash invalide, `rename` impossible, temporaire résiduel, restauration octet pour octet, deux mondes concurrents, suppression pendant tick, benchmarks 10/50/100.
-- **Acceptation** : aucun écart mémoire/disque après échec injecté ; ordre des verrous toujours monde → global ; 215 tests existants verts.
-- **Risques/prévention** : interblocage → ordre unique documenté et testé ; Windows → erreur dure ; gros diff → une responsabilité par commit.
-- **Exclusions** : worker de calcul, UI, changement de moteur SQLite, WAL, compression générale de la base.
+- **Tests** : échec avant/après `COMMIT`, hash invalide, `rename` impossible, temporaire résiduel, restauration octet pour octet, deux mondes concurrents, suppression pendant tick, files et timeouts, 21 tests dédiés. Les benchmarks 10/50/100 restent un outil local exclu des validations.
+- **Acceptation vérifiée** : aucun écart mémoire/disque après échec injecté ; ordre des verrous toujours monde → global ; suite **264/264**, test long isolé **9/9**, typecheck 4 configs et build OK.
+- **Risques/prévention** : interblocage → ordre unique documenté et testé ; Windows → erreur dure ; gros diff → une responsabilité par module.
+- **Exclusions** : worker de calcul, UI, changement de moteur SQLite, WAL, compression générale de la base, optimisations de persistance.
 
 ### 4.3 Tranche 3D-C — Worker de calcul
 
@@ -293,7 +293,7 @@ Ces ordres de grandeur justifient la compression, les index et l'absence de purg
 | 50 | 50 | 237 752 o | 4 755,0 o | 4 386 / 5 069 o | 41 872,8 o |
 | 100 | 100 | 404 895 o | 4 048,9 o | 3 381 / 5 136 o | 38 086,8 o |
 
-La charge utile canonique réelle (~38–42 Ko) est supérieure à l'hypothèse de 8 Ko, mais la compression la ramène à ~4 Ko par décision. Aucune purge n'est introduite pour autant : la limitation opérationnelle identifiée est ailleurs. `persist()` réexporte l'intégralité de la base à chaque tick, si bien que le coût par tick croît avec l'historique déjà stocké (mesuré de ~52 ms à ~157 ms pour 3 personnages entre les ticks 25 et 200). La tranche 3D-B doit donc être livrée avant toute montée en charge ; voir [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md) §7 et [SAFE_PERSISTENCE.md](SAFE_PERSISTENCE.md).
+La charge utile canonique réelle (~38–42 Ko) est supérieure à l'hypothèse de 8 Ko, mais la compression la ramène à ~4 Ko par décision. Aucune purge n'est introduite pour autant : la limitation opérationnelle identifiée est ailleurs. `persist()` réexporte l'intégralité de la base à chaque tick, si bien que le coût par tick croît avec l'historique déjà stocké (mesuré en 3D-A de ~52 ms à ~157 ms pour 3 personnages entre les ticks 25 et 200 ; benchmarks 3D-B locaux : 63,68 ms au tick 10 et 377,56 ms au tick 200 pour 3 personnages, 548,45/1 329,12/1 652,77 ms pour 10/50/100 personnages). Aucune mesure 3D-A comparable à effectif égal ne permet de conclure à une amélioration. La tranche 3D-B est livrée, mais le coût reste ouvert : voir [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md) §7 et [SAFE_PERSISTENCE.md](SAFE_PERSISTENCE.md) §10.
 
 ## 8. Risques principaux
 

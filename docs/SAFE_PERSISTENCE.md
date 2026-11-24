@@ -1,154 +1,150 @@
-# Persistance sécurisée de la base SQLite — [Planifié, Phase 3D]
+# Persistance sécurisée de la base SQLite — Phase 3D-B implémentée
 
-> Aucun changement de persistance n'est implémenté par cette tranche documentaire.
-> Le comportement réel aujourd'hui est `db.export()` puis `writeFileSync(path, Buffer)` dans
-> `world-store.service.ts`.
+> Tranche 3D-B livrée. Le fichier `data/saves/worlds.sqlite` n'est plus réécrit
+> directement : toute mutation passe par un snapshot restaurable, une transaction
+> courte et une écriture atomique `temp + fsync + SHA-256 + rename`. Aucun repli
+> silencieux par copie partielle n'est autorisé.
 
-## 1. État actuel et problème
+## 1. Problème résolu
 
-`persist(db)` réécrit l'intégralité du fichier `data/saves/worlds.sqlite` à chaque mutation, y compris :
+Avant 3D-B, `persist(db)` faisait `writeFileSync(getDbPath(), db.export())` juste
+après `COMMIT`. Trois défauts étaient vérifiés dans le code :
 
-- l'initialisation `getDb()` (`ensureSchema()` puis `persist()`) ;
-- la création/suppression de monde et de personnage, ainsi que toute la bibliothèque de modèles ;
-- `getWorld()`, qui met à jour `last_opened_at` et `updated_at` ;
-- chaque tick réussi, après `COMMIT` ;
-- les helpers de test `_setCharacterActionJsonForTests()`, `_setSimulationClockForTests()`, `_setWorldStatusForTests()` et `_resetWorldStoreForTests()`.
+1. le fichier cible était écrasé en place, sans atomïcité au niveau fichier ;
+2. aucune vérification du contenu écrit n'était effectuée ;
+3. si l'écriture échouait après `COMMIT`, la base mémoire conservait le tick alors
+   que le disque conservait l'état précédent.
 
-Quatre limites sont vérifiées dans le code :
+La tranche 3D-B couvre la persistance, la restauration mémoire, les verrous et la
+suppression concurrente. Le calcul reste dans le main (3D-C non commencée).
 
-1. `writeFileSync` est synchrone dans le processus principal ;
-2. l'écriture directe sur le fichier cible n'est pas atomique ;
-3. si `persist()` échoue après `COMMIT`, la base mémoire contient le tick mais le fichier contient encore l'état précédent ;
-4. `persist(db): void` est appelé sans `await` : il deviendra `atomicPersist(buffer): Promise<void>` et tous les appelants devront attendre la promesse.
+## 2. Séquence réelle d'un tick
 
-Le correctif doit donc couvrir à la fois le fichier et la cohérence mémoire/disque.
-
-## 2. Séquence retenue pour un tick
-
-Deux verrous distincts sont nécessaires :
-
-- le **verrou du monde**, détenu pendant tout le tick, y compris l'attente du calcul ;
-- le **verrou global d'accès à SQLite**, pris uniquement autour des sections qui lisent ou écrivent la base.
-
-L'ordre est toujours **monde → global**. Le verrou global n'est pas détenu pendant `await compute-tick` : il bloquerait les écritures des autres mondes pendant jusqu'à 30 s. Le verrou du monde garantit qu'aucune opération du même monde ne modifie la base pendant le calcul.
+L'ordre des verrous est strict : **verrou du monde puis verrou global SQLite**.
 
 ```text
-withWorldLock(worldId):
-  // Section 1 : lecture du snapshot, sous verrou global
-  withDbWrite:
-    1. valider monde + horloge (sans mutation)
-    2. lire snapshot, runtimes et état PRNG
-    3. mémoriser expected = { worldId, tick, day, hour, rngState initial }
-
-  // Calcul : aucun verrou global, aucun accès SQLite
-  4. calculer le tick (main en 3D-A/B, worker en 3D-C)
-
-  // Section 2 : validation et écriture, sous verrou global
-  withDbWrite:
-    5. relire monde + horloge ; si expected a changé, erreur sans écriture
-    6. beforeBuffer = db.export()   // état exact avant mutation
-    7. BEGIN TRANSACTION
-    8. écrire états, runtime, historique, horloge, status
-    9. COMMIT
-   10. afterBuffer = db.export()
-   11. atomicPersist(afterBuffer)   // temp, fsync, hash, rename
-   12. si échec à 10 ou 11 : restoreDatabaseFromBuffer(beforeBuffer), puis relancer
+withWorldLock(worldId)                 // manager, couvre tout le tick
+  withDbWrite                          // file globale SQLite
+    valider monde + horloge (sans mutation)
+    before = snapshotDatabaseFromDisk() // dernier état disque validé, mis en cache
+    BEGIN TRANSACTION
+    charger snapshots/runtimes/PRNG
+    calculer le tick (synchrone en 3D-B)
+    écrire états, runtime, historique, horloge, statut
+    COMMIT
+    after = db.export()
+    atomicPersist(after)
+    si échec avant rename : restoreDatabaseFromBuffer(before), puis relancer
+  fin withDbWrite
+  syncWorkerForStatus + broadcast       // toujours sous le verrou du monde
+fin withWorldLock
 ```
 
-Le `beforeBuffer` est exporté **après** le calcul et **avant** `BEGIN`, sous le verrou global : il capture les écritures concurrentes des autres mondes survenues pendant le calcul. Restaurer un export pris avant le calcul effacerait ces écritures.
+Le calcul est synchrone dans le main en 3D-B : le verrou global reste donc détenu
+pendant cette section courte, mais jamais pendant un `await` externe. En 3D-C, le
+calcul deviendra asynchrone : le verrou global sera relâché pendant l'attente du
+worker, puis repris pour relire l'horloge et exporter `before` juste avant
+`BEGIN`. Un export pris avant une attente asynchrone écraserait les écritures
+d'autres mondes survenues pendant cette attente.
 
-Le coût passe d'un export complet par tick à deux exports. C'est le prix de la réversibilité en cas d'échec disque ; il doit être mesuré dans les tests 3D-B avec 10, 50 et 100 personnages.
-
-La transaction SQLite ne reste pas ouverte pendant l'attente du worker : c'est le verrou du monde qui exclut les opérations concurrentes du même monde, et le verrou global qui exclut les accès SQLite simultanés.
+`before` est fourni par `snapshotDatabaseFromDisk()`, qui retourne une copie du
+dernier tampon validé par `atomicPersist`. Le verrou global garantit que ce tampon
+est exactement l'état mémoire courant au début de la mutation : cela évite un
+second `db.export()` complet sans perdre la restaurabilité octet pour octet.
 
 ## 3. Écriture atomique
 
-Chemin temporaire : `data/saves/worlds.sqlite.tmp`.
+`atomicPersist(dbPath, buffer, options?)` dans `persistence.service.ts` :
 
-```text
-writeFile(temp, buffer)
-open(temp, 'r+') → fsync()
-readFile(temp) → compare taille + SHA-256 avec buffer
-rename(temp, target)
-POSIX uniquement : open(dir, 'r') → fsync()
-```
+1. nettoie `worlds.sqlite.tmp` résiduel sans toucher au fichier cible ;
+2. ouvre le temporaire avec `wx` et mode `0600` sur le **même répertoire** ;
+3. écrit tous les octets avec `writeSync`, puis `fsyncSync` du fichier ;
+4. relit le temporaire et compare taille + SHA-256 avec le tampon source ;
+5. `renameSync(temp, target)` remplace la cible atomiquement ;
+6. POSIX uniquement : `fsyncSync` du répertoire parent.
 
-- Le hash est calculé dans le main avec `node:crypto`.
-- `created_at` des enregistrements est produit avant l'écriture ; il ne dépend pas de la réussite du `rename`.
-- Le fichier temporaire n'est jamais utilisé comme base de données.
-- Si une étape échoue avant `rename`, le temporaire est supprimé et la base mémoire est restaurée depuis `beforeBuffer`.
-- Si le processus s'arrête avant `rename`, le fichier cible reste intact et le temporaire est nettoyé au démarrage suivant.
-- Si le processus s'arrête après `rename`, le fichier cible contient le tick complet.
+Le hash est calculé dans le main avec `node:crypto`. `created_at` est produit
+avant l'écriture et ne dépend pas du `rename`. Le temporaire n'est jamais utilisé
+comme base de données. Une erreur avant `rename` lève une erreur dure, supprime le
+temporaire et laisse la cible intacte. Après un `rename` réussi, la base disque est
+considérée validée : une erreur de `fsync` du répertoire est journalisée et
+retournée dans `directoryFsyncError`, sans restauration mémoire (qui créerait une
+divergence inverse). Ce champ n'est jamais ignoré silencieusement : il est
+journalisé dans le main et couvert par un test.
+
+Les options `fsync`, `directoryFsync` et `platform` existent uniquement pour les
+tests : elles permettent de simuler un `fsync` refusé ou une plateforme Windows
+sans introduire de dépendance native.
 
 ## 4. Restauration de la base mémoire
 
-`database-connection.service.ts` expose une fonction de restauration interne :
+`restoreDatabaseFromBuffer(buffer)` :
 
-```ts
-restoreDatabaseFromBuffer(buffer: Uint8Array): void;
-```
+1. crée une nouvelle `Database` sql.js depuis `buffer` ;
+2. rejoue `PRAGMA foreign_keys = ON` ;
+3. remplace `dbPromise` et `currentDb` ;
+4. réinitialise le cache du dernier état disque validé avec `buffer` ;
+5. ferme l'ancienne instance.
 
-Comportement :
+Aucune migration n'est rejouée : le snapshot contient déjà le schéma, ce qui
+garantit l'égalité octet pour octet avec l'état antérieur. Le verrou global est
+toujours détenu pendant la restauration, donc aucune écriture ne peut
+s'intercaler. Les hooks de test sont appelés avant l'écriture, dans la
+transaction (rollback SQL existant de 3D-A), puis aux étapes de l'écriture
+atomique (`beforeWrite`, `beforeFsync`, `beforeVerify`, `beforeRename`,
+`afterRename`).
 
-1. fermer l'instance `sql.js` courante ;
-2. créer une nouvelle `Database` depuis `beforeBuffer` ;
-3. remplacer la promesse de base courante ;
-4. rejouer `PRAGMA foreign_keys = ON` et les gardes de schéma nécessaires ;
-5. rendre le contrôle à l'appelant, qui relance l'erreur d'origine après la restauration.
+## 5. Verrous
 
-Aucune autre opération SQLite ne peut s'intercaler, car le verrou global est toujours détenu pendant la restauration. Les hooks de test existants sont appelés **dans** la transaction, après `writeTickCharacterStates()` et avant `upsertClock()`. La tranche 3D-B ajoutera des hooks distincts avant `BEGIN`, après `COMMIT`, avant `rename` et pendant la vérification du hash.
+### 5.1 Verrou global SQLite
 
-## 5. Verrou global d'écriture
+`db-write-lock.service.ts` expose `withDbWrite<T>()` : une file de promesses
+module-level sérialise toutes les opérations qui peuvent écrire dans la base
+sql.js partagée. Une erreur précédente ne poisonne pas la file. Un timeout de
+30 s couvre l'attente de la file ; la libération a lieu dans tous les cas.
 
-Le verrou est une chaîne de promesses module-level :
+Toutes les mutations passent par ce verrou : initialisation, CRUD monde et
+personnage, bibliothèque de modèles, `getWorld()` (qui écrit `last_opened_at`),
+commandes de simulation, tick, helpers de test et suppression. Les lectures pures
+restent hors verrou.
 
-```ts
-withDbWrite<T>(fn: () => T | Promise<T>): Promise<T>;
-```
+### 5.2 Verrou par monde
 
-L'ordre de verrou est toujours **verrou du monde puis verrou global d'écriture** pour toute opération ciblant un monde. Le manager détient déjà le verrou par monde autour des ticks et des commandes ; les handlers et services qui écrivent un monde doivent l'utiliser aussi. Aucune opération ne doit prendre le verrou global avant le verrou du monde quand les deux sont nécessaires.
+Le manager corrige le nettoyage de `worldLocks` : la map stocke désormais la
+promesse chaînée réellement comparée dans le `finally`. Un timeout de 30 s est
+appliqué à l'attente du verrou. Le verrou du monde couvre le tick, la
+synchronisation du worker et le broadcast, ainsi que toutes les commandes de
+simulation et la suppression. Les ticks tardifs d'un monde supprimé sont ignorés
+grâce au tombeau `deletedWorldIds`.
 
-Toutes les opérations qui peuvent écrire doivent passer par ce verrou :
+### 5.3 Suppression concurrente d'un monde
 
-- initialisation de la base (`ensureSchema()` + `persist()`) et récupération des horloges au démarrage, sous verrou global seul ;
-- `createWorld`, `deleteWorld`, `getWorld` (qui écrit `last_opened_at`) ;
-- création/modification/suppression de personnages et de modèles ;
-- `start/pause/resume/step/setSpeed/stop` et lecture de statut si elle touche à la base ;
-- insertion et lecture des enregistrements de décision si la lecture décompresse ou valide ;
-- helpers `_set*ForTests` et `_resetWorldStoreForTests`, ou exemption explicite documentée hors production.
+`WORLD_DELETE` appelle désormais `simulationDeleteWorld(id)`, jamais
+`deleteWorld()` directement. Séquence :
 
-Les lectures purement en mémoire qui ne touchent jamais la base peuvent rester hors verrou. En cas de doute, une opération passe par le verrou.
+1. prendre le verrou du monde (attend la fin du tick en cours) ;
+2. poser le tombeau et envoyer `stop` au planificateur ;
+3. nettoyer `activeTickWorlds` ;
+4. prendre le verrou global via `deleteWorld()`, supprimer les lignes et
+   persister atomiquement ;
+5. relâcher les verrous dans l'ordre inverse.
 
-Le nettoyage actuel de `worldLocks` est incorrect : la map stocke `previous.then(() => current)` alors que le `finally` compare `current`. Il faut conserver la promesse chaînée réellement stockée, par exemple `const chained = previous.then(() => current); worldLocks.set(worldId, chained); … if (worldLocks.get(worldId) === chained) worldLocks.delete(worldId);`.
-
-### 5.1 Suppression concurrente d'un monde
-
-Le handler IPC `WORLD_DELETE` ne doit plus faire :
-
-```ts
-deleteWorld(id);
-simulationClearWorld(id);
-```
-
-Il appelle un helper manager garantissant cet ordre :
-
-1. prendre le verrou du monde, ce qui attend la fin du tick en cours et empêche tout nouveau tick ;
-2. arrêter la planification et annuler les `pendingComputes` de ce monde ; aucune réponse tardive ne pourra écrire ;
-3. prendre le verrou global d'écriture ;
-4. supprimer les lignes SQLite et persister la base dans la même section verrouillée ;
-5. nettoyer `activeTickWorlds` et la map des verrous ;
-6. relâcher le verrou global puis le verrou du monde, puis notifier l'UI.
-
-L'ancien comportement de `deleteWorld()` reste disponible comme service interne, mais n'est plus appelé directement par l'IPC. Le `simulationClearWorld()` actuel poste `stop` et vide les maps sans attendre : il doit être remplacé par ce helper orchestré.
+En 3D-B il n'existe pas encore de calcul asynchrone ni de `pendingComputes` : le
+tombeau suffit à invalider les signaux déjà en file. La tranche 3D-C devra ajouter
+l'annulation explicite des requêtes en attente avant de relâcher le verrou du
+monde. Le service interne `deleteWorld()` reste disponible mais n'est plus appelé
+par l'IPC.
 
 ## 6. Plateformes
 
-| Plateforme | Comportement attendu | Précaution |
+| Plateforme | Comportement vérifié | Précaution |
 |---|---|---|
-| Linux / macOS | `rename(temp, target)` remplace atomiquement le fichier. Le `fsync` du répertoire est tenté si le runtime le permet. | Vérifier que le fichier cible n'est pas un répertoire. |
-| Windows | Node/libuv utilise `MoveFileEx` avec remplacement ; aucun repli par copie n'est autorisé. | Un verrou antivirus ou un handles ouvert peut produire `EPERM`/`EACCES` : erreur dure, restauration mémoire, aucun fichier partiel. |
+| Linux / macOS | `renameSync` remplace la cible de façon atomique ; `fsync` du fichier et du répertoire parent. | Vérification que la cible n'est pas un répertoire. |
+| Windows | Node/libuv utilise `MoveFileEx` avec remplacement via `renameSync`. Aucun repli par copie. | `EPERM`/`EACCES` reste une erreur dure : cible intacte, temporaire supprimé, mémoire restaurée. Simulé en test via `platform: 'win32'`. |
 
-Aucune dépendance native n'est ajoutée. `sql.js` reste le moteur ; le WASM embarqué continue d'être chargé via `resource.service.ts`. Le remplacement atomique est une propriété du système de fichiers, pas de SQLite.
+Aucune dépendance native n'est ajoutée. `sql.js` reste le moteur ; le WASM embarqué
+continue d'être chargé via `resource.service.ts`. Le remplacement atomique est une
+propriété du système de fichiers, pas de SQLite.
 
 ## 7. Démarrage et récupération
 
@@ -156,10 +152,13 @@ Aucune dépendance native n'est ajoutée. `sql.js` reste le moteur ; le WASM emb
 
 1. détecter `worlds.sqlite.tmp` et le supprimer ;
 2. charger `worlds.sqlite` ;
-3. exécuter `ensureSchema(db)`, qui inclut déjà `PRAGMA table_info`, `ALTER TABLE ADD COLUMN`, le backfill legacy et, depuis la 3D-A, `decision_records` avec `schema_migrations` ; ne pas ajouter une seconde passe de migrations ;
-4. convertir les horloges `running` en `paused`, comportement inchangé.
+3. exécuter `ensureSchema(db)`, qui inclut les migrations additives et la table
+   `decision_records` de 3D-A, sans seconde passe ;
+4. convertir les horloges `running` en `paused` ;
+5. initialiser le cache du dernier état disque validé avec l'export produit par
+   `ensureSchema()`.
 
-Un fichier temporaire résiduel n'est jamais fusionné ni importé.
+Un temporaire résiduel n'est jamais fusionné ni importé.
 
 ## 8. Matrice d'échecs
 
@@ -167,25 +166,50 @@ Un fichier temporaire résiduel n'est jamais fusionné ni importé.
 |---|---|---|---|
 | Échec avant `BEGIN` | inchangé | inchangé | erreur remontée |
 | Échec pendant écritures SQL | inchangé | `ROLLBACK` transactionnel | erreur remontée |
-| Échec du `db.export()` après `COMMIT` | inchangé | restauré depuis `beforeBuffer` | erreur remontée |
+| Échec du `db.export()` après `COMMIT` | inchangé | restauré depuis `before` | erreur remontée |
 | Échec d'écriture du temporaire | inchangé | restauré | temporaire supprimé |
-| Échec de vérification hash | inchangé | restauré | temporaire supprimé |
-| Échec du `rename` | inchangé | restauré | temporaire supprimé, erreur dure |
+| Échec du `fsync` du fichier | inchangé | restauré | temporaire supprimé |
+| Échec de vérification SHA-256 | inchangé | restauré | temporaire supprimé |
+| Échec du `rename` (`EPERM` inclus) | inchangé | restauré | temporaire supprimé, erreur dure |
+| `fsync` du répertoire après `rename` | nouvel état complet | conservé | journalisé dans `directoryFsyncError` |
 | Arrêt avant `rename` | ancien état | sans objet | temporaire nettoyé au prochain démarrage |
 | Arrêt après `rename` | nouvel état complet | sans objet | reprise normale |
 
-## 9. Tests prévus
+## 9. Tests livrés
 
-- hooks injectés avant `BEGIN`, dans la transaction (existant), après `COMMIT`, avant `rename` et pendant la vérification du hash ;
-- fichier cible verrouillé/inexistant selon la plateforme simulée ;
-- redémarrage avec temporaire résiduel ;
-- base mémoire restaurée vérifiée octet pour octet contre `beforeBuffer` ;
-- deux mondes qui écrivent en parallèle : aucun chevauchement détectable et aucune écriture perdue ;
-- relecture d'horloge divergente : erreur sans écriture ;
-- suppression de monde pendant un tick et pendant un calcul worker ;
-- benchmarks 10/50/100 personnages : durée de `export`, durée d'écriture, taille fichier ;
-- ancienne sauvegarde Phase 1/3C ouverte après migration.
+- écriture atomique nominale, suppression du temporaire ;
+- panne avant écriture, avant fsync, fsync refusé, hash altéré, avant rename ;
+- erreur après rename : nouveau fichier conservé et erreur journalisée ;
+- `rename` `EPERM` simulé sur Windows : aucune copie partielle ;
+- temporaire résiduel nettoyé au démarrage sans import ;
+- tick avec échec avant `rename` : mémoire et disque restaurés octet pour octet ;
+- tick avec hash altéré : restauration mémoire et horloge inchangée ;
+- deux ticks de mondes différents : sérialisation, aucun tick perdu, mémoire = disque ;
+- file d'écriture globale : sérialisation, libération après erreur, timeout ;
+- manager : deux ticks du même monde, deux mondes distincts, suppression pendant
+  tick, deux suppressions concurrentes, erreur sous verrou, absence de deadlock.
 
-## 10. Hors périmètre
+Validation : 13 tests d'écriture atomique, 3 de file globale et 5 de manager, soit
+21 nouveaux tests ; suite hors benchmark/test long **264/264**, test long isolé **9/9**,
+typecheck 4 configs et build de production OK.
 
-WAL natif, better-sqlite3, sauvegarde automatique périodique, export/import par monde, compression générale de la base, chiffrement, déplacement de SQLite dans un worker.
+## 10. Limitation de performance
+
+La durabilité ajoutée (temporaire, double hash, `fsync` fichier et répertoire)
+coûte plus cher que l'ancien `writeFileSync` direct. `db.export()` réexporte
+toujours toute la base, avec double copie mémoire et double SHA-256 ;
+`decision_records` croît sans purge ni rétention. Les benchmarks 3D-B locaux
+(non rejoués pendant la validation finale) donnent 63,68 ms au tick 10 et
+377,56 ms au tick 200 pour 3 personnages, 548,45 ms pour 10, 1 329,12 ms pour 50,
+1 652,77 ms pour 100 et 1 254,09 ms/tick pour 3×10 mondes. Aucune mesure 3D-A
+comparable à effectif égal n'est disponible : ces chiffres ne prouvent pas une
+amélioration. Aucun timeout de test n'a été relevé artificiellement pour masquer
+ce coût ; le test long isolé passe en 6,00 s avec son délai explicite de 30 s.
+Le déplacement du calcul dans un worker (3D-C), l'IPC/UI (3D-D) et les
+optimisations (hash en flux, persistance groupée, rétention) restent ouverts.
+
+## 11. Hors périmètre
+
+WAL natif, better-sqlite3, sauvegarde automatique périodique, export/import par
+monde, compression générale de la base, chiffrement, déplacement de SQLite dans
+un worker, annulation de `pendingComputes` (3D-C).

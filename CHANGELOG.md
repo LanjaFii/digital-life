@@ -2,6 +2,34 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-25 — Phase 3D-B (persistance atomique et verrous)
+
+### Added
+- `src/main/services/database-connection.service.ts` : cycle de vie sql.js, WASM, `PRAGMA foreign_keys = ON`, `snapshotDatabaseFromDisk()` avec cache du dernier état disque validé, `restoreDatabaseFromBuffer()`, `persistSnapshotOrRestore()`, `runDbTransaction()`, nettoyage du temporaire résiduel à l'ouverture.
+- `src/main/services/database-schema.service.ts` : `ensureSchema()` extrait sans changement de schéma ni de migration.
+- `src/main/services/persistence.service.ts` : `atomicPersist()` (`temp + fsync + SHA-256 + rename`, `fsync` du répertoire, `directoryFsyncError` journalisé), hooks de panne par étape, aucun repli par copie partielle.
+- `src/main/services/db-write-lock.service.ts` : file globale d'écriture, timeout 30 s, libération après erreur.
+- `tests/atomic-persistence.test.ts` (13), `tests/db-write-lock.test.ts` (3), `tests/simulation-manager-lock.test.ts` (5) : 21 nouveaux tests.
+- `.gitignore` : le benchmark local `tests/zz-benchmark.tmp.test.ts` est ignoré sans être supprimé et n'est pas versionné.
+
+### Changed
+- `src/main/services/world-store.service.ts` : façade et exports publics conservés ; toutes les mutations passent par `withDbWrite()` et la persistance atomique ; aucun CRUD déplacé.
+- `src/main/services/simulation-manager.service.ts` : nettoyage corrigé de `worldLocks`, timeout 30 s, tombeau `deletedWorldIds`, verrou du monde couvrant tick/sync/broadcast, `simulationDeleteWorld()` et helper de test de réinitialisation.
+- `src/main/ipc/world.ipc.ts` : `WORLD_DELETE` appelle `simulationDeleteWorld(id)` au lieu de deux opérations séparées.
+- `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DATABASE.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/CHARACTER_TICK_RULES.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md` : état réel 3D-B, validations, limites et problèmes de performance.
+
+### Fixed
+- Divergence mémoire/disque après un échec de `persist()` : restauration octet pour octet depuis le dernier état validé ; `fsync` du répertoire après `rename` journalisé sans restauration inverse.
+- Nettoyage inefficace de `worldLocks` (promesse chaînée non comparée) et suppression de monde non sérialisée avec le tick en cours.
+
+### Removed
+- Aucune fonctionnalité existante ; seul l'ancien chemin de persistance `writeFileSync` direct n'est plus utilisé.
+
+### Technical decisions
+- Ordre des verrous strict monde → global ; le verrou global ne doit jamais couvrir un `await` externe en 3D-C. Aucun changement de schéma, PRNG, Golden Hash, calcul, preload, renderer, worker de calcul ni appel LLM.
+- Sauvegarde hors dépôt vérifiée avant validation ; typecheck 4 configs OK ; tests **264/264** (27 fichiers, benchmark et test long exclus) ; test long isolé **9/9** ; build de production OK. Aucun seuil RAM/swap/RSS/charge franchi.
+- Performance toujours ouverte : `persist()` réexporte toute la base, double copie mémoire et double SHA-256, `decision_records` sans purge/rétention ; benchmarks 3D-B locaux 3 pers. 63,68 ms (tick 10) et 377,56 ms (tick 200), 10/50/100 pers. 548,45/1 329,12/1 652,77 ms, 3×10 mondes 1 254,09 ms/tick ; aucune mesure 3D-A comparable, aucune optimisation opportuniste.
+
 ## 2026-11-24 — Phase 3D-A (historique technique des décisions)
 
 ### Added

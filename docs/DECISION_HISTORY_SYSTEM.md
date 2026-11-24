@@ -7,9 +7,10 @@
 > La tranche 3D-A ajoute uniquement l'historique technique : aucun IPC, preload, UI,
 > worker, verrou global ni changement de persistance fichier n'est concerné.
 >
-> **Statut : tranche 3D-A implémentée et validée.** Le calcul Phase 3C reste
-> byte-identique à entrées égales (Golden Hash). 252 tests passent, typecheck des
-> quatre configurations et build réussis. Les tranches 3D-B à 3D-D restent à faire.
+> **Statut : tranches 3D-A et 3D-B implémentées et validées.** Le calcul Phase 3C reste
+> byte-identique à entrées égales (Golden Hash). La suite passe 264/264 (hors test long et
+> benchmark), le test long isolé passe 9/9, typecheck des quatre configurations et build
+> réussis. Les tranches 3D-C et 3D-D restent à faire.
 
 ## 1. Deux notions distinctes
 
@@ -267,7 +268,7 @@ Mesures réelles effectuées après un tick avec la génération aléatoire par 
 | 50 | 50 | 237 752 o | 4 755,0 o | 4 386 / 5 069 o | 41 872,8 o |
 | 100 | 100 | 404 895 o | 4 048,9 o | 3 381 / 5 136 o | 38 086,8 o |
 
-**Limitation connue** : `persist()` réexporte l'intégralité de `worlds.sqlite` à chaque tick. Le coût d'un tick croît donc avec le nombre d'enregistrements déjà stockés (mesuré de ~52 ms à ~157 ms pour 3 personnages entre le tick 25 et le tick 200). Aucune optimisation de persistance n'est introduite en 3D-A : le verrou global (3D-B), le déplacement du calcul (3D-C) et la lecture IPC (3D-D) restent des tranches distinctes. Pour une simulation longue ou un grand nombre de personnages, la tranche 3D-B doit être livrée avant toute montée en charge.
+**Limitation connue** : `persist()` réexporte l'intégralité de `worlds.sqlite` à chaque tick, avec double copie mémoire et double SHA-256. Le coût d'un tick croît donc avec le nombre d'enregistrements déjà stockés (3D-A : ~52 ms à ~157 ms pour 3 personnages entre les ticks 25 et 200 ; benchmarks 3D-B locaux : 63,68 ms au tick 10 et 377,56 ms au tick 200 pour 3 personnages, 548,45/1 329,12/1 652,77 ms pour 10/50/100 personnages, 1 254,09 ms/tick pour 3×10 mondes). Aucune mesure 3D-A comparable à effectif égal ne permet d'affirmer une amélioration. La 3D-B a ajouté la durabilité atomique et les verrous, pas l'optimisation : hash en flux, persistance groupée et rétention de l'historique restent à faire. Aucune purge n'est introduite. Voir [SAFE_PERSISTENCE.md](SAFE_PERSISTENCE.md) §10.
 
 Les helpers de lecture internes sont bornés à 500 entrées (défaut 50). La future UI appliquera elle aussi une fenêtre de 500 entrées maximum : ce n'est pas une limite de stockage.
 

@@ -29,7 +29,7 @@
 | `worlds.status` | `preparation` par défaut, garde main étendue aux statuts simulation | Implémenté : `simulation_running/paused/stopped`, lecture legacy `simulation_started` normalisée. |
 | `characters.updated_at` | date ISO de dernière écriture | Horodatage **réel**, pas un temps simulé ; ne pas l'utiliser comme horloge de simulation. |
 | `src/main/simulation/` | `simulation.worker.ts` | Worker de planification implémenté ; logique métier de tick reste à ajouter en Phase 3B+. |
-| Persistance | `db.export()` + `writeFileSync` après chaque mutation | Un tick complet = **une seule écriture disque** (transaction + export) pour éviter un état partiel. |
+| Persistance | `db.export()` + écriture atomique `temp + fsync + SHA-256 + rename` après chaque mutation (3D-B) | Un tick complet = **une seule écriture disque** (transaction + export vérifié) pour éviter un état partiel. |
 | IPC | canaux stricts, renderer sans Node | Les commandes (`start/pause/step/speed`) devront être des canaux dédiés, validés main, sans accès DB côté renderer. |
 | UI | aucune simulation, aucun bouton de démarrage | Ne pas ajouter de faux bouton : la commande n'existera qu'avec le moteur. |
 
@@ -216,9 +216,9 @@ Cela rend le résultat indépendant de la vitesse d'exécution et du thread.
 ### 6.1 Règles de sauvegarde
 
 - **Une transaction par tick** (état + relations + événements + souvenirs + horloge).
-  `db.export()` puis `writeFileSync` une seule fois après `COMMIT`, comme pour les autres
-  mutations (voir `docs/DATABASE.md`). Un crash ne peut donc laisser qu'un tick complet
-  ou l'état du tick précédent, jamais un état intermédiaire.
+  `db.export()` puis une seule écriture atomique après `COMMIT`, comme pour les autres
+  mutations (voir `docs/DATABASE.md` et `docs/SAFE_PERSISTENCE.md`). Un crash ne peut donc
+  laisser qu'un tick complet ou l'état du tick précédent, jamais un état intermédiaire.
 - **Snapshots périodiques** **[Planifié]** : copies complètes de la base tous les `N`
   ticks, en plus de la persistance incrémentale. Leur fréquence est un paramètre à calibrer
   (coût disque vs fenêtre de récupération). Aucun snapshot n'est à implémenter maintenant.

@@ -14,7 +14,7 @@
 | `CharacterInstance` | `initialState` immuable après démarrage, `currentState` évolutif. | Seul `currentState` est modifié. |
 | `SeededRng` | mulberry32 sérialisable `getState/setState` uint32. | Reprise déterministe possible ; ne pas consommer sans besoin. |
 | Worker/Manager | Worker planifie/signale ; main valide, verrou par monde, écrit SQLite, broadcast. | Les règles métier restent côté main/services purs appelés par le store/manager. |
-| Persistance | sql.js, `db.export()` + `writeFileSync` après mutation. | Un tick = une écriture disque cohérente. |
+| Persistance | sql.js, `db.export()` + écriture atomique vérifiée après mutation (3D-B). | Un tick = une écriture disque cohérente et restaurable. |
 
 ## 2. Périmètre strict
 
@@ -48,7 +48,7 @@ flowchart TD
     I --> K[Écrire current_*_json et miroirs legacy personnages]
     K --> L[Écrire simulation_clock tick/day/hour/rngState]
     L --> M[COMMIT]
-    M --> N[persist : db.export + writeFileSync unique]
+    M --> N[persist : db.export + écriture atomique unique]
     N --> O[Broadcast statut validé]
 ```
 

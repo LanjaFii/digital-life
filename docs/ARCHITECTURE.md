@@ -46,15 +46,16 @@ chiffrée via `safeStorage` (Phase 6).
 
 - **Source de vérité** : SQLite `simulation_clock`, `worlds.status` et `characters.current_*_json`, écrits uniquement par le main.
 - **Commandes** : `simulation:status/start/pause/resume/step/speed/stop` (IPC validé). Le renderer ne peut pas écrire l'horloge directement.
-- **Tick atomique** : transaction SQLite + un seul `persist(db)` par commande/tick. Depuis la Phase 3C, le tick calcule aussi besoins, émotions, décisions, effets et runtime.
-- **Explications** : `decisions`, `actionDeltas`, `actionRuntimeStates`, `deltas` et `warnings` sont calculés mais non persistés aujourd'hui ; la Phase 3D les rend auditables.
+- **Tick atomique** : transaction SQLite + une seule écriture disque atomique par commande/tick. Depuis la Phase 3C, le tick calcule aussi besoins, émotions, décisions, effets et runtime.
+- **Explications** : `decisions`, `actionDeltas`, `actionRuntimeStates`, `deltas` et `warnings` sont remplis ; depuis 3D-A, une ligne complète par décision est persistée dans `decision_records`. Aucune UI n'y accède encore.
+- **Verrous/persistance (3D-B)** : ordre monde → global, file d'écriture module-level, `temp + fsync + SHA-256 + rename`, restauration mémoire depuis le dernier état disque validé, suppression de monde sérialisée.
 - **Déterminisme** : seed simulation = `world.seed ^ 0x85ebca6b`, `rng_state` uint32 persisté, tri des personnages par identifiant, au plus un tirage PRNG par décision en ex æquo réel.
 - **Reprise** : au démarrage app, les horloges `running` sont converties en `paused` (pas d'auto-reprise).
 - **Arrêt** : `simulation_stopped` conserve les données ; pas de redémarrage implicite.
 
 ## Évolutions possibles
 
-- **Phase 3D [Planifié]** : historique des décisions, verrou global d'écriture, persistance atomique, worker de calcul dédié, inspecteur UI minimal. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md).
+- **Phase 3D [3D-A/3D-B implémentées, 3D-C/3D-D planifiées]** : historique des décisions, verrou global d'écriture et persistance atomique livrés ; worker de calcul dédié et inspecteur UI minimal restent à faire. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md).
 - Ajouter des règles métier futures (relations, événements, souvenirs) en conservant transaction atomique et déterminisme.
 - Ajouter un worker d'analyse statistique distinct du worker de calcul, sans jamais donner SQLite aux workers.
 - Remplacer sql.js par better-sqlite3 uniquement si une compilation native locale est acceptée (non retenu).

@@ -94,7 +94,7 @@ flowchart TD
     X --> F[8. finalizeCharacter : clamp + quantize unique]
     F --> W[9. Écritures : états, runtime, horloge/rngState]
     W --> CM[COMMIT]
-    CM --> P[persist unique : db.export + writeFileSync]
+    CM --> P[persist unique : db.export + écriture atomique]
     P --> BR[Broadcast statut validé]
 
     G -.->|étapes reportées| M[Mémoire pertinente : aucune]

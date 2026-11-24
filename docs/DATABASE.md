@@ -1,13 +1,13 @@
 # Base de données
 
-## État réel (Phase 3D-A)
+## État réel (Phase 3D-B)
 
 Un **fichier SQLite unique** : `data/saves/worlds.sqlite` (sql.js, WASM embarqué dans
 `resources/sqlite/`, aucun CDN). En dev : racine du projet ; en app packagée : `userData`.
-Le fichier est réécrit intégralement (`db.export()` → `writeFileSync`) après chaque
-mutation/transaction validée. Cette écriture est **synchrone et non atomique au niveau du
-fichier** : la Phase 3D propose de la remplacer par `temp + fsync + hash + rename` avec
-restauration de la base mémoire en cas d'échec
+Depuis 3D-B, chaque mutation/transaction validée est écrite via un fichier temporaire
+situé dans le même répertoire, `fsync`, vérification SHA-256 de la copie lue, puis
+`rename` atomique. Si une étape échoue avant le `rename`, la base mémoire est restaurée
+octet pour octet depuis le dernier état disque validé
 (voir [SAFE_PERSISTENCE.md](SAFE_PERSISTENCE.md)). Le renderer n'y accède **jamais**
 directement : tout passe par preload → IPC → main → services/store.
 
