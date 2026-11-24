@@ -2,7 +2,7 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (tranche 3 intégration tick + persistance terminée, en attente de commit/push).
+- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (tranche 3 intégration tick + persistance terminée, commitée et poussée).
 - **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C documentée et validée, **tranches 1, 2 et 3 implémentées/validées** (contrats, catalogue, sept services purs, intégration au tick et persistance atomique du runtime). `forkFromStopped` reste `[Reporté]`.
 - **Dernière mise à jour** : 2026-11-24.
 - **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant la tranche 3 : `7c426193331ff39e90acb7da26b06b1db8e8da7d` (`feat(phase3c): add pure decision and action services`), identique à `origin/main`, arbre propre.

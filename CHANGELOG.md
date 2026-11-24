@@ -26,7 +26,7 @@ Format : entrées datées, catégories Added / Changed / Fixed / Removed / Techn
 - Le runtime d'action, les besoins/émotions, l'horloge et `rngState` sont écrits dans une seule transaction avec un seul `persist(db)` ; un runtime corrompu reste une erreur technique avec rollback intégral.
 - `current_goals_json` n'est toujours jamais écrit par le moteur ; le libellé des objectifs n'est jamais interprété.
 - Une seule quantification par tick : `executeActionEffects` finalise les valeurs, l'orchestrateur ne les requantifie pas.
-- Validations : typecheck 4 configs OK, tests **215/215** (22 fichiers), build OK. Commit/push à venir.
+- Validations : typecheck 4 configs OK, tests **215/215** (22 fichiers), build OK. Commité et poussé (`9be7d27`).
 
 ## 2026-11-24 — Phase 3C, tranche 2 (services purs de décision et d'action)
 

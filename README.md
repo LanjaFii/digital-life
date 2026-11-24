@@ -5,7 +5,7 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C tranche 3 terminée** (décisions et actions autonomes deterministes intégrées au tick, runtime et PRNG persistés atomiquement ; en attente de commit/push). Relations, événements, souvenirs, mort et LLM non implémentés.
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C tranche 3 terminée** (décisions et actions autonomes deterministes intégrées au tick, runtime et PRNG persistés atomiquement ; commitée et poussée). Relations, événements, souvenirs, mort et LLM non implémentés.
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
 > tests (209/209), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
 

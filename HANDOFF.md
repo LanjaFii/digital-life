@@ -5,8 +5,7 @@
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
 - **HEAD au démarrage de la tranche 3** : `7c426193331ff39e90acb7da26b06b1db8e8da7d`
   (`feat(phase3c): add pure decision and action services`), identique à `origin/main`, arbre propre.
-- **Tranche courante** : **Phase 3C — tranche 3 intégration/persistance terminée**, en attente
-  de commit/push. Tranches 1 à 3 livrées : contrats, catalogue, sept services purs (51 tests),
+- **Tranche courante** : **Phase 3C — tranche 3 intégration/persistance terminée**, commitée et poussée. Tranches 1 à 3 livrées : contrats, catalogue, sept services purs (51 tests),
   branchement complet sur le tick et colonne SQLite `current_action_json`. Aucun IPC, preload,
   UI, worker ni appel LLM modifié.
 - **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution passive
@@ -204,9 +203,8 @@ bash scripts/dev.sh
 
 ## Prochaine tâche recommandée
 
-1. **Finaliser la tranche Git de la tranche 3** : vérifier diff/absence secrets/data,
-   committer, pousser `origin/main` sans force, vérifier hash local = distant et arbre propre.
-   **Arrêt à cette étape si le push échoue.**
+1. **Tranche Git de la tranche 3 terminée** : diff et absence de secrets/data vérifiés,
+   commit `9be7d27` poussé sans force, hash local = `origin/main` = distant, arbre propre.
 2. **Décision produit à trancher** : politique `simulation_stopped` (nouvelle branche recommandée).
    Ne pas implémenter de reprise implicite ni `forkFromStopped` sans validation.
 3. Éventuellement, tranche dédiée table d'historique des actions, persistance intégrale des
