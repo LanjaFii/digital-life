@@ -6,6 +6,7 @@ import type { CreateCharacterInWorldInput, CreateTemplateInput, InstantiateTempl
 import {
   createCharacterInWorld,
   createTemplate,
+  deleteCharacterInstance,
   deleteTemplate,
   getTemplate,
   instantiateTemplate,
@@ -28,6 +29,12 @@ export function registerCharacterIpc(): void {
     if (typeof worldId !== 'string' || !worldId.trim()) throw new Error('Identifiant de monde invalide.');
     const obj = asObject(input) as unknown as UpdateCharacterInstanceInput;
     return updateCharacterInstance({ ...obj, id, worldId });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.CHARACTER_DELETE, (_event, id: unknown, worldId: unknown) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('Identifiant de personnage invalide.');
+    if (typeof worldId !== 'string' || !worldId.trim()) throw new Error('Identifiant de monde invalide.');
+    return deleteCharacterInstance(id, worldId);
   });
 
   ipcMain.handle(IPC_CHANNELS.CHARACTER_RANDOM_DRAFT, () => generateDraftState(randomInt(0, 2_147_483_647)));

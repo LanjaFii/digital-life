@@ -672,6 +672,36 @@ export async function updateCharacterInstance(input: UpdateCharacterInstanceInpu
   };
 }
 
+/**
+ * Supprime une seule instance de personnage, exclusivement dans le monde demandé.
+ * Valide les identifiants, l'existence du monde, son statut de préparation et
+ * l'appartenance réelle du personnage au monde. Le modèle d'origine n'est jamais touché.
+ */
+export async function deleteCharacterInstance(id: string, worldId: string): Promise<{ deleted: boolean }> {
+  const characterId = typeof id === 'string' ? id.trim() : '';
+  const targetWorldId = typeof worldId === 'string' ? worldId.trim() : '';
+  if (!characterId) throw new Error('Identifiant de personnage invalide.');
+  if (!targetWorldId) throw new Error('Identifiant de monde invalide.');
+
+  const db = await getDb();
+  assertWorldPreparation(db, targetWorldId);
+
+  // Vérification d'appartenance avant suppression : un id valide d'un autre monde
+  // ne doit jamais permettre de supprimer quoi que ce soit.
+  const existing = db.prepare('SELECT id FROM characters WHERE id = ? AND world_id = ?');
+  existing.bind([characterId, targetWorldId]);
+  const found = existing.step();
+  existing.free();
+  if (!found) throw new Error('Personnage introuvable dans ce monde.');
+
+  const del = db.prepare('DELETE FROM characters WHERE id = ? AND world_id = ?');
+  del.run([characterId, targetWorldId]);
+  del.free();
+  syncWorldCharacterCount(db, targetWorldId);
+  persist(db);
+  return { deleted: true };
+}
+
 /** Test/utilitaire : réinitialise le singleton (ferme la DB en mémoire). */
 export async function _resetWorldStoreForTests(): Promise<void> {
   if (dbPromise) {

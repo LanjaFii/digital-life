@@ -44,6 +44,7 @@ describe('Sécurité IPC', () => {
       CHARACTER_LIST: 'character:list',
       CHARACTER_CREATE: 'character:create',
       CHARACTER_UPDATE: 'character:update',
+      CHARACTER_DELETE: 'character:delete',
       CHARACTER_RANDOM_DRAFT: 'character:random-draft',
       TEMPLATE_LIST: 'template:list',
       TEMPLATE_GET: 'template:get',

@@ -84,11 +84,18 @@ aléatoire déterministe est inchangée. Couvert par `tests/character-library.te
 
 - Mondes : `createWorld`, `listWorlds`, `getWorld`, `deleteWorld` (cascade personnages).
 - Instances : `listCharacters`, `createCharacterInWorld` (+ modèle optionnel),
-  `updateCharacterInstance`, `instantiateTemplate` (copie profonde, nouvel UUID).
+  `updateCharacterInstance`, `instantiateTemplate` (copie profonde, nouvel UUID),
+  `deleteCharacterInstance(id, worldId)` (suppression ciblée, voir ci-dessous).
 - Modèles : `createTemplate`, `listTemplates`, `getTemplate`, `updateTemplate`, `deleteTemplate`.
-- Garde `assertWorldPreparation` : refuse création/instanciation/modification si
-  `status = 'simulation_started'`.
-- `syncWorldCharacterCount` maintient `worlds.character_count` exact.
+- Garde `assertWorldPreparation` : refuse création/instanciation/modification/**suppression**
+  si `status = 'simulation_started'` (contrôle côté main, pas seulement masquage UI).
+- `syncWorldCharacterCount` maintient `worlds.character_count` exact (aussi après suppression).
+- **Suppression d'instance** (`deleteCharacterInstance`, IPC `character:delete`) : valide
+  les identifiants, vérifie l'existence du monde et son statut, contrôle l'appartenance avec
+  `SELECT id FROM characters WHERE id = ? AND world_id = ?`, puis `DELETE` avec les deux
+  mêmes prédicats — aucune manipulation IPC ne peut supprimer une instance d'un autre monde.
+  Le modèle référencé par `template_id` n'est pas modifié (pas de cascade, pas de schéma modifié) ;
+  la persistance est immédiate.
 
 ## [Planifié]
 

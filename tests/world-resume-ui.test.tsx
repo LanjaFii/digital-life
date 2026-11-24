@@ -68,6 +68,7 @@ function installApi(overrides: Partial<DigitalLifeApi> = {}): DigitalLifeApi {
     listCharacters: vi.fn().mockResolvedValue({ characters: [makeCharacter(), makeCharacter({ id: 'char-2', firstName: 'Bob', lastName: 'Durand', gender: 'male', age: 34 })] }),
     createCharacter: vi.fn(),
     updateCharacter: vi.fn(),
+    deleteCharacter: vi.fn().mockResolvedValue({ deleted: true }),
     generateRandomDraft: vi.fn(),
     listTemplates: vi.fn().mockResolvedValue({ templates: [] }),
     getTemplate: vi.fn(),

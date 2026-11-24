@@ -1,10 +1,12 @@
-import { ArrowLeft, Brain, Heart, Sparkles, Target, User } from 'lucide-react';
+import { ArrowLeft, Brain, Heart, Sparkles, Target, Trash2, User } from 'lucide-react';
 import type { Character } from '../../shared/character';
 import { StatBar } from './StatBar';
 
 interface Props {
   character: Character;
   onBack: () => void;
+  /** Fourni uniquement pour une instance de monde (jamais pour un modèle de bibliothèque). */
+  onDelete?: () => void;
 }
 
 const TRAIT_LABELS: Record<string, string> = {
@@ -61,7 +63,7 @@ function genderLabel(gender: Character['gender']): string {
   return 'Non binaire';
 }
 
-export function CharacterDetail({ character, onBack }: Props) {
+export function CharacterDetail({ character, onBack, onDelete }: Props) {
   const state = character.currentState;
   const primary = state.goals.find((g) => g.kind === 'primary');
   const secondary = state.goals.filter((g) => g.kind === 'secondary');
@@ -72,6 +74,11 @@ export function CharacterDetail({ character, onBack }: Props) {
         <button type="button" className="button ghost" onClick={onBack}>
           <ArrowLeft size={16} /> Retour aux personnages
         </button>
+        {onDelete ? (
+          <button type="button" className="button danger" onClick={onDelete}>
+            <Trash2 size={15} /> Supprimer ce personnage
+          </button>
+        ) : null}
       </div>
 
       <section className="panel detail-hero">

@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : Phase 1 — Création manuelle de personnages et bibliothèque réutilisable (tranche validée).
-- **Avancement approximatif** : 80 % (Phase 1).
-- **Dernière mise à jour** : 2026-11-23.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Tranche précédente validée/poussée à `470523a`. Tranche « création manuelle + bibliothèque » : tests/typecheck/build/smoke réel OK, commit/push effectués et vérifiés dans cette session (voir `git log`).
+- **Phase** : Phase 1 — Suppression d'une instance de personnage (tranche validée).
+- **Avancement approximatif** : 85 % (Phase 1).
+- **Dernière mise à jour** : 2026-11-24.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Tranche précédente validée/poussée à `1a3d182` (création manuelle + bibliothèque). Tranche « suppression d'instance » : tests/typecheck/build/smoke réel OK, commit/push effectués et vérifiés dans cette session (voir `git log`).
 
 ## Fonctionnalités terminées
 
@@ -37,6 +37,7 @@
 - [x] Indépendance totale modèle/instances : édition/suppression de modèle sans effet sur les instances ; édition d'instance sans effet sur le modèle ni les autres mondes ; `template_id` informatif remis à NULL à la suppression du modèle.
 - [x] Modification d'instance en préparation ; `worlds.status` (`preparation`/`simulation_started`) + garde main `assertWorldPreparation` (verrouillage futur, pas de faux démarrage).
 - [x] Migration additive : `characters.template_id/updated_at/initial_*_json/current_*_json` backfillés depuis les colonnes legacy ; anciens mondes/personnages préservés (test dédié sur base legacy).
+- [x] Suppression d'une instance de personnage : action sur la carte et la fiche, confirmation modale identifiant personnage/monde et caractère définitif, annulation, suppression via IPC dédié `character:delete`, actualisation liste/compteur, retour à la liste depuis la fiche, notification de succès, erreurs IPC affichées. Garde main : statut `preparation`, ids valides, appartenance réelle au monde ; modèle original et instances des autres mondes intacts, compteur resynchronisé, persistance SQLite.
 
 ## Fonctionnalités non commencées
 
@@ -72,6 +73,10 @@ Ajouts tranche création manuelle + bibliothèque :
 - `src/renderer/components/character-labels.ts`
 - `tests/character-library.test.ts`, `tests/character-library-ui.test.tsx`
 
+Ajouts tranche suppression d'instance :
+- `src/renderer/components/ConfirmDeleteCharacterDialog.tsx`
+- `tests/character-deletion.test.ts`, `tests/character-deletion-ui.test.tsx`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -80,12 +85,13 @@ Ajouts tranche création manuelle + bibliothèque :
 - Correctif dev Linux : `scripts/dev.mjs` (détection sandbox restreint, `--no-sandbox` dev uniquement, avertissement), `vite.config.ts` → `vite.config.mts`, `tsconfig.json`, `docs/TROUBLESHOOTING.md`, `docs/DEVELOPMENT.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
 - Tranche reprise : `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/ipc/world.ipc.ts`, `src/main/services/world-store.service.ts`, `src/renderer/App.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/world-store.test.ts`, `package.json`, `package-lock.json`, docs de suivi.
 - Tranche création manuelle + bibliothèque : `src/shared/character.ts`, `src/shared/world.ts`, `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/main.ts`, `src/main/services/world-store.service.ts`, `src/main/services/character-generator.service.ts`, `src/renderer/App.tsx`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/character-generation.test.ts`, `tests/world-resume-ui.test.tsx`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
+- Tranche suppression d'instance : `src/shared/ipc.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/character.ipc.ts`, `src/preload/preload.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/phase0.test.ts`, `tests/world-resume-ui.test.tsx`, `tests/character-library-ui.test.tsx`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
 
 ## Tests réussis
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **70/70 passés** (6 fichiers : phase0, world-store, character-generation, world-resume-ui, character-library, character-library-ui).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **88/88 passés** (8 fichiers : phase0, world-store, character-generation, world-resume-ui, character-library, character-library-ui, character-deletion, character-deletion-ui).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
 - **Lancement réel Electron dev** (Linux restreint, 2026-11-23) : Vite + Electron `--no-sandbox --disable-gpu --remote-debugging-port=9229` (dev uniquement, `src/main/security/window.ts` inchangé). Smoke CDP en 2 phases avec **redémarrage réel** d'Electron, 10 parcours validés :
   1. création manuelle d'Alice (sociabilité 85) dans Smoke A via le formulaire 6 étapes ;
@@ -99,6 +105,19 @@ Ajouts tranche création manuelle + bibliothèque :
   9. suppression du modèle avec confirmation ;
   10. instances intactes (A=2 via « Utiliser », B=1, C=1), `template_id` NULL.
   Bonus : action « Utiliser » depuis la bibliothèque validée. Migration de la base legacy réelle vérifiée au lancement. Mondes/modèles de smoke supprimés ; base utilisateur restaurée à son état pré-smoke.
+
+- **Lancement réel Electron dev** (Linux restreint, 2026-11-24) pour la suppression d'instance : Vite + Electron `--no-sandbox --disable-gpu --remote-debugging-port=9229` (dev uniquement), smoke CDP en 2 phases avec **redémarrage réel** :
+   1. création de deux mondes (`Del A` : 3 personnages aléatoires, `Del B` : 1) ;
+   2. création d'un modèle + instanciation dans A et B ;
+   3. ouverture de la confirmation depuis une carte : nom du personnage, monde, caractère définitif affichés ;
+   4. annulation : aucune suppression, liste inchangée ;
+   5. confirmation depuis la carte : instance supprimée, carte retirée, compteur 4 → 3, notification de succès ;
+   6. suppression de l'instance du modèle dans A : modèle intact, instance B intacte, instance A supprimée ;
+   7. suppression depuis la fiche détaillée : retour automatique à la liste, compteur 3 → 1, notification ;
+   8. tentative IPC cross-world (`deleteCharacter(idB, worldA)`) : refusée, instance B intacte ;
+   9. tentative IPC avec identifiant vide : refusée ;
+   10. après redémarrage réel : suppressions persistées (A=1, B=1), modèle intact, compteurs corrects ;
+   11. nettoyage des mondes/modèles de smoke puis restauration byte-identique de la base utilisateur.
 
 ## Tests échoués
 
@@ -118,4 +137,4 @@ Ajouts tranche création manuelle + bibliothèque :
 
 ## Prochaine tâche précise
 
-Phase 1 restante / transition Phase 2 : polish de la gestion des personnages (ex. suppression d'une instance d'un monde en préparation avec confirmation, duplication d'instance) puis préparation de la Phase 2 (évolution dynamique) — **sans** moteur de simulation tant que les fondations ne sont pas validées. Voir HANDOFF.md pour la recommandation détaillée.
+Phase 1 terminée : CRUD complet des instances (création, lecture, modification, suppression). Prochaine étape : préparer la Phase 2 (évolution dynamique des besoins/émotions : contrat `initialState` → `currentState`) puis la Phase 3 (worker, démarrage réel de simulation, verrouillage UI via `worlds.status`) — **sans** commencer le moteur de simulation ni OpenRouter avant validation des fondations. Voir HANDOFF.md pour la recommandation détaillée.

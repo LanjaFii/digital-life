@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Calendar, Dna, Hash, Users, AlertTriangle, RefreshCw, Plus, Library, Pencil } from 'lucide-react';
+import { ArrowLeft, Calendar, CheckCircle2, Dna, Hash, Users, AlertTriangle, RefreshCw, Plus, Library, Pencil, Trash2, X } from 'lucide-react';
 import type { Character, CharacterDraft } from '../../shared/character';
 import type { WorldSummary } from '../../shared/world';
 import { CharacterDetail } from './CharacterDetail';
 import { CharacterForm } from './CharacterForm';
 import { AddFromLibraryDialog } from './AddFromLibraryDialog';
+import { ConfirmDeleteCharacterDialog } from './ConfirmDeleteCharacterDialog';
 import { EMOTION_LABELS, TRAIT_LABELS, draftFromCharacter } from './character-labels';
 
 interface Props {
@@ -49,6 +50,10 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [showLibraryPicker, setShowLibraryPicker] = useState(false);
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
+  const [confirmDeleteCharacter, setConfirmDeleteCharacter] = useState<Character | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -89,6 +94,54 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
     await load();
   };
 
+  const handleDeleteCharacter = async () => {
+    if (!confirmDeleteCharacter) return;
+    const target = confirmDeleteCharacter;
+    setDeletingId(target.id);
+    setActionError(null);
+    setNotice(null);
+    try {
+      const result = await window.digitalLife.deleteCharacter(target.id, worldId);
+      setConfirmDeleteCharacter(null);
+      // Si la fiche du personnage supprimé était ouverte, revenir à la liste.
+      if (selectedCharacterId === target.id) setSelectedCharacterId(null);
+      await load();
+      if (result.deleted) setNotice(`${target.firstName} ${target.lastName} a été supprimé de ce monde.`);
+    } catch (cause) {
+      setConfirmDeleteCharacter(null);
+      setActionError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const banners = (
+    <>
+      {notice ? (
+        <div className="notice success" role="status">
+          <CheckCircle2 size={16} /> <span>{notice}</span>
+          <button type="button" className="banner-close" aria-label="Fermer la notification" onClick={() => setNotice(null)}><X size={14} /></button>
+        </div>
+      ) : null}
+      {actionError ? (
+        <div className="error-banner" role="alert">
+          <AlertTriangle size={16} /> <span>{actionError}</span>
+          <button type="button" className="banner-close" aria-label="Fermer l'erreur" onClick={() => setActionError(null)}><X size={14} /></button>
+        </div>
+      ) : null}
+    </>
+  );
+
+  const confirmDialog = confirmDeleteCharacter ? (
+    <ConfirmDeleteCharacterDialog
+      character={confirmDeleteCharacter}
+      worldName={world?.name ?? 'ce monde'}
+      busy={deletingId === confirmDeleteCharacter.id}
+      onConfirm={() => void handleDeleteCharacter()}
+      onCancel={() => setConfirmDeleteCharacter(null)}
+    />
+  ) : null;
+
   if (loading) {
     return (
       <div className="world-view">
@@ -126,10 +179,16 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
           <button type="button" className="button ghost" onClick={onBackToMenu}><ArrowLeft size={16} /> Menu principal</button>
           <button type="button" className="button ghost" onClick={() => setEditingCharacter(selectedCharacter)}><Pencil size={15} /> Modifier ce personnage</button>
         </div>
-        <CharacterDetail character={selectedCharacter} onBack={() => setSelectedCharacterId(null)} />
+        {banners}
+        <CharacterDetail
+          character={selectedCharacter}
+          onBack={() => setSelectedCharacterId(null)}
+          onDelete={() => setConfirmDeleteCharacter(selectedCharacter)}
+        />
         {editingCharacter ? (
           <CharacterForm mode="edit" context="world" title={`Modifier ${editingCharacter.firstName} ${editingCharacter.lastName}`} initialDraft={draftFromCharacter(editingCharacter)} submitLabel="Enregistrer les modifications" onCancel={() => setEditingCharacter(null)} onSubmit={(draft) => handleUpdate(draft)} />
         ) : null}
+        {confirmDialog}
       </div>
     );
   }
@@ -144,6 +203,8 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
           <button type="button" className="button primary" onClick={() => setShowCreate(true)}><Plus size={15} /> Créer un personnage</button>
         </div>
       </div>
+
+      {banners}
 
       <section className="panel world-hero">
         <div>
@@ -180,26 +241,32 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
               const dominant = dominantEmotion(character);
               const traits = representativeTraits(character);
               return (
-                <button
-                  key={character.id}
-                  type="button"
-                  className="character-card"
-                  onClick={() => setSelectedCharacterId(character.id)}
-                >
-                  <div className="character-card-head">
-                    <div>
-                      <h3>{character.firstName} {character.lastName}</h3>
-                      <p className="character-sub">{genderLabel(character.gender)} · {character.age} ans</p>
+                <div key={character.id} className="character-card">
+                  <button
+                    type="button"
+                    className="character-card-open"
+                    onClick={() => setSelectedCharacterId(character.id)}
+                  >
+                    <div className="character-card-head">
+                      <div>
+                        <h3>{character.firstName} {character.lastName}</h3>
+                        <p className="character-sub">{genderLabel(character.gender)} · {character.age} ans</p>
+                      </div>
+                      <span className="emotion-chip">{dominant.label} {dominant.value}</span>
                     </div>
-                    <span className="emotion-chip">{dominant.label} {dominant.value}</span>
+                    <p className="character-bio">{character.biography}</p>
+                    <div className="trait-pills">
+                      {traits.map((trait) => (
+                        <span key={trait.key} className="trait-pill">{trait.label} <strong>{trait.value}</strong></span>
+                      ))}
+                    </div>
+                  </button>
+                  <div className="character-card-actions">
+                    <button type="button" className="button danger" onClick={() => setConfirmDeleteCharacter(character)}>
+                      <Trash2 size={14} /> Supprimer
+                    </button>
                   </div>
-                  <p className="character-bio">{character.biography}</p>
-                  <div className="trait-pills">
-                    {traits.map((trait) => (
-                      <span key={trait.key} className="trait-pill">{trait.label} <strong>{trait.value}</strong></span>
-                    ))}
-                  </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -213,6 +280,8 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
       {showLibraryPicker ? (
         <AddFromLibraryDialog worldId={worldId} onClose={() => setShowLibraryPicker(false)} onAdded={() => load()} />
       ) : null}
+
+      {confirmDialog}
     </div>
   );
 }

@@ -30,6 +30,10 @@ conséquences calculées par le moteur.
 - **Ajout depuis la bibliothèque** dans un monde : sélection → aperçu → confirmation →
   copie indépendante ; modification d'un personnage tant que le monde est en préparation.
   Les modèles et les instances sont totalement indépendants (aucune synchronisation).
+- **Suppression d'un personnage d'un monde** : action sur la carte ou la fiche, confirmation
+  (nom du personnage, monde, suppression définitive), annulation possible, liste et compteur
+  actualisés, retour à la liste depuis la fiche. Refusée côté main hors préparation ;
+  le modèle d'origine et les instances des autres mondes restent intacts (Phase 1).
 
 ### Planifiées (phases 2 à 8)
 Évolution dynamique des personnages, moteur multi-agents dans un worker,

@@ -158,6 +158,15 @@ button, input { font: inherit; }
   border-radius: 12px; color: #ffb8bf; font-size: 14px;
 }
 
+.notice {
+  position: relative; z-index: 1; max-width: 1180px; width: 100%; margin: 0 auto;
+  display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+  border-radius: 12px; font-size: 14px;
+}
+.notice.success { background: rgba(143,214,168,0.08); border: 1px solid rgba(143,214,168,0.25); color: #a8e5bc; }
+.banner-close { margin-left: auto; display: inline-grid; place-items: center; padding: 4px; border: 0; background: none; color: inherit; cursor: pointer; opacity: 0.8; }
+.banner-close:hover { opacity: 1; }
+
 .dialog-backdrop {
   position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px;
   background: rgba(5, 4, 8, 0.72); backdrop-filter: blur(4px);
@@ -231,6 +240,10 @@ button, input { font: inherit; }
   color: inherit; cursor: pointer; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 .character-card:hover { transform: translateY(-2px); border-color: rgba(255,196,107,0.28); box-shadow: 0 12px 30px rgba(0,0,0,0.25); }
+.character-card-open { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.character-card-open:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; border-radius: 10px; }
+.character-card-actions { display: flex; justify-content: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06); }
+.character-card-actions .button { padding: 6px 10px; font-size: 12px; }
 .character-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
 .character-card h3 { margin: 0; font-size: 20px; font-family: Georgia, "Times New Roman", serif; }
 .character-sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
@@ -243,6 +256,7 @@ button, input { font: inherit; }
 /* Character detail */
 .character-detail { display: grid; gap: 20px; }
 .detail-topbar { display: flex; align-items: center; gap: 12px; }
+.detail-topbar .danger { margin-left: auto; }
 .detail-hero { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
 .detail-identity h2 { margin: 0; font-size: clamp(30px, 4vw, 44px); font-family: Georgia, "Times New Roman", serif; }
 .detail-bio { margin: 12px 0 0; max-width: 700px; color: #d4cadc; line-height: 1.65; }

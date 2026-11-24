@@ -26,6 +26,7 @@ export const IPC_CHANNELS = {
   CHARACTER_LIST: 'character:list',
   CHARACTER_CREATE: 'character:create',
   CHARACTER_UPDATE: 'character:update',
+  CHARACTER_DELETE: 'character:delete',
   CHARACTER_RANDOM_DRAFT: 'character:random-draft',
   TEMPLATE_LIST: 'template:list',
   TEMPLATE_GET: 'template:get',
@@ -65,6 +66,7 @@ export interface DigitalLifeApi {
   listCharacters(worldId: string): Promise<CharacterListResult>;
   createCharacter(input: CreateCharacterInWorldInput): Promise<{ character: CharacterInstance; template?: CharacterTemplate }>;
   updateCharacter(id: string, worldId: string, input: UpdateCharacterInstanceInput): Promise<CharacterInstance>;
+  deleteCharacter(id: string, worldId: string): Promise<{ deleted: boolean }>;
   generateRandomDraft(): Promise<RandomCharacterDraft>;
   listTemplates(): Promise<CharacterTemplateListResult>;
   getTemplate(id: string): Promise<CharacterTemplate>;

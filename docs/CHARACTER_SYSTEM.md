@@ -108,6 +108,27 @@ Quand `status = 'simulation_started'` (futur), toute création/instanciation/mod
 est refusée côté main (`assertWorldPreparation`). **Aucun faux démarrage de simulation
 n'est implémenté dans cette tranche** ; le champ `status` prépare la règle.
 
+## Suppression d'une instance (Phase 1)
+
+Action « Supprimer » sur la carte du personnage ou « Supprimer ce personnage » dans sa fiche.
+La confirmation `ConfirmDeleteCharacterDialog` identifie le personnage (nom + court ID) et
+le monde courant, précise que la suppression est définitive **pour ce monde**, que le modèle
+et les autres mondes ne sont pas touchés, et propose Annuler / Supprimer définitivement.
+
+Après confirmation :
+- l'instance est supprimée via `character:delete` (renderer → preload → IPC → main → SQLite) ;
+- la liste et le compteur du monde sont actualisés immédiatement ;
+- si la fiche du personnage supprimé était ouverte, l'écran revient à la liste ;
+- une notification de succès s'affiche ; les erreurs IPC sont affichées dans un banner.
+
+Côté main, `deleteCharacterInstance(id, worldId)` valide les deux identifiants, exige
+`worlds.status = 'preparation'`, vérifie l'appartenance réelle (`SELECT id ... WHERE id = ?
+AND world_id = ?`) puis supprime avec les deux prédicats, resynchronise le compteur et
+persiste. Une tentative IPC avec un personnage d'un autre monde est refusée sans rien supprimer.
+Le modèle (`character_templates`) n'est jamais modifié ; toutes les autres instances, y compris
+celles du même modèle dans d'autres mondes, restent inchangées. Aucune modification de schéma.
+La suppression est définitive (pas de corbeille ; **[Planifié]** : backups/export).
+
 ## Génération déterministe (inchangée)
 
 - PRNG seedé `mulberry32` (`src/main/services/prng.ts`), aucun `Math.random()` dans le générateur.
@@ -124,6 +145,7 @@ Renderer → preload → IPC → main → SQLite uniquement. Canaux (`src/shared
 | `character:list` | `listCharacters(worldId)` | Personnages d'un monde |
 | `character:create` | `createCharacter(input)` | Création manuelle (+ modèle si `saveAsTemplate`) |
 | `character:update` | `updateCharacter(id, worldId, input)` | Modification d'instance (préparation) |
+| `character:delete` | `deleteCharacter(id, worldId)` | Suppression d'instance (préparation, monde validé) |
 | `character:random-draft` | `generateRandomDraft()` | Personnalité aléatoire cohérente |
 | `template:list` | `listTemplates()` | Bibliothèque |
 | `template:get` | `getTemplate(id)` | Détail modèle |

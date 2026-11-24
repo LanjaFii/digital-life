@@ -15,6 +15,7 @@ const api: DigitalLifeApi = {
   listCharacters: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_LIST, worldId),
   createCharacter: (input) => ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_CREATE, input),
   updateCharacter: (id, worldId, input) => ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_UPDATE, id, worldId, input),
+  deleteCharacter: (id, worldId) => ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_DELETE, id, worldId),
   generateRandomDraft: () => ipcRenderer.invoke(IPC_CHANNELS.CHARACTER_RANDOM_DRAFT),
   listTemplates: () => ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_LIST),
   getTemplate: (id) => ipcRenderer.invoke(IPC_CHANNELS.TEMPLATE_GET, id),

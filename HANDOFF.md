@@ -3,10 +3,11 @@
 ## Où en est le développement
 
 Phase 0 validée. Phase 1 : menu principal, génération/persistance, reprise/consultation,
-**création manuelle de personnages et bibliothèque réutilisable** — tranche terminée,
-testée (70/70), buildée, smoke Electron réel 10 parcours validé, committée/poussée sur
-`origin/main` (hash vérifié par `git ls-remote --heads origin main`, working tree propre).
-Tranche précédente : `470523a` (reprise/consultation).
+création manuelle de personnages, bibliothèque réutilisable,
+**suppression d'une instance de personnage** — tranche terminée,
+testée (88/88), buildée, smoke Electron réel 2 phases avec redémarrage validé,
+committée/poussée sur `origin/main` (hash vérifié par `git ls-remote --heads origin main`,
+working tree propre). Tranche précédente : `1a3d182` (création manuelle + bibliothèque).
 
 ## Ce qui vient d'être réalisé
 
@@ -38,6 +39,28 @@ Tranche précédente : `470523a` (reprise/consultation).
   séquence validés (création → bibliothèque → redémarrage → édition modèle → 2 mondes →
   édition instance → indépendance A=85/B=20/C=95/modèle=95 → suppression modèle →
   instances intactes). Base utilisateur restaurée après smoke.
+- **Suppression d'instance (tranche 2026-11-24)** :
+  - service `deleteCharacterInstance(id, worldId)` : trim/validation des ids, `assertWorldPreparation`,
+    `SELECT id ... WHERE id = ? AND world_id = ?` avant suppression, `DELETE` avec les deux
+    prédicats, `syncWorldCharacterCount`, `persist` ; modèle jamais touché, aucun changement de schéma ;
+  - IPC `character:delete` (`id`, `worldId` validés côté main) + preload `deleteCharacter(id, worldId)` ;
+  - UI : actions « Supprimer » sur chaque carte et « Supprimer ce personnage » dans la fiche,
+    `ConfirmDeleteCharacterDialog` (nom du personnage, monde, caractère définitif, annulation),
+    actualisation liste/compteur, retour à la liste depuis la fiche, notification `role="status"`,
+    erreurs IPC en `role="alert"` ; cartes passées de `<button>` à `<div>` + bouton interne
+    pour éviter les boutons imbriqués ; `onDelete` optionnel sur `CharacterDetail` (inchangé
+    pour les modèles de bibliothèque) ;
+  - tests : `tests/character-deletion.test.ts` (13 tests service : suppression valide, monde
+    vide/sans correspondance, id inexistant, cross-world, statut verrouillé, modèle conservé,
+    instances des autres mondes conservées, compteur, persistance après reset, ids invalides,
+    monde inexistant, autres personnages inchangés, instance sans modèle) et
+    `tests/character-deletion-ui.test.tsx` (5 tests jsdom : confirmation/annulation,
+    actualisation + notification, erreur IPC, retour à la liste depuis la fiche, annulation
+    depuis la fiche). Total **88/88** (8 fichiers) ;
+  - smoke réel : annulation, suppression carte (compteur 4→3), suppression de l'instance
+    d'un modèle (modèle et instance B intacts), suppression fiche (compteur 3→1 + retour liste),
+    refus IPC cross-world et id vide, persistance après redémarrage, nettoyage + DB restaurée
+    byte-identique.
 
 ## Décisions techniques
 
@@ -52,6 +75,10 @@ Tranche précédente : `470523a` (reprise/consultation).
   le bouton « personnalité cohérente » du formulaire.
 - Sandbox dev Linux : contournement `--no-sandbox` isolé à `scripts/dev.mjs` (dev uniquement),
   `src/main/security/window.ts` inchangé.
+- Suppression d'instance : pas de suppression en cascade ; la suppression est conditionnée
+  aux deux prédicats `id` **et** `world_id` (contrôle d'appartenance avant `DELETE`), afin
+  qu'une manipulation IPC ne puisse pas toucher le personnage d'un autre monde. Le modèle
+  reste intact (référence `template_id` informative, pas de FK). Aucune modification de schéma.
 
 ## Problèmes rencontrés
 
@@ -59,6 +86,9 @@ Tranche précédente : `470523a` (reprise/consultation).
   template_id » (index créé avant l'ALTER). Corrigé + test de non-régression. Leçon :
   toujours tester la migration sur une base au schéma précédent, pas seulement une base neuve.
 - Linux restreint (AppArmor/userns) : voir `docs/TROUBLESHOOTING.md` (historique, résolu dev-only).
+- Harness smoke B : la première exécution a affiché un faux échec car une valeur numérique
+  (`cardsA`) était incluse dans un `.every(v === true)` ; le harness a été corrigé et la
+  séquence complète A+B rejouée avec succès. Aucun bug applicatif.
 
 ## Fichiers importants à examiner
 
@@ -66,8 +96,12 @@ Tranche précédente : `470523a` (reprise/consultation).
 `src/shared/character.ts`, `src/main/services/world-store.service.ts`,
 `src/main/services/character-validation.service.ts`, `src/main/ipc/character.ipc.ts`,
 `src/renderer/components/CharacterForm.tsx`, `src/renderer/components/LibraryView.tsx`,
-`src/renderer/components/WorldView.tsx`, `tests/character-library.test.ts`,
-`tests/character-library-ui.test.tsx`.
+`src/renderer/components/WorldView.tsx`, `src/renderer/components/ConfirmDeleteCharacterDialog.tsx`,
+`src/renderer/components/CharacterDetail.tsx`, `src/shared/ipc.ts`,
+`src/main/services/world-store.service.ts`, `src/main/ipc/character.ipc.ts`,
+`tests/character-library.test.ts`, `tests/character-library-ui.test.tsx`,
+`tests/character-deletion.test.ts`, `tests/character-deletion-ui.test.tsx`,
+`docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
 
 ## Commande de relance
 
@@ -77,11 +111,10 @@ Tests : `bash scripts/test.sh` — Typecheck : Node local + `scripts/typecheck.m
 
 ## Prochaine tâche recommandée
 
-1. **Suppression d'une instance d'un monde en préparation** (avec confirmation,
-   resynchronisation du `character_count`) : c'est la seule opération CRUD instance
-   manquante ; petite tranche symétrique de la suppression de modèle.
-2. Ensuite, préparer la **Phase 2** (évolution dynamique des besoins/émotions) en
-   définissant le contrat `initialState` → `currentState`, puis la Phase 3 (worker,
-   démarrage réel de simulation, verrouillage UI via `worlds.status`).
+1. Le CRUD des instances est désormais complet (création, lecture, modification,
+   suppression) : plus d'opération instance manquante en Phase 1.
+2. Préparer la **Phase 2** (évolution dynamique des besoins/émotions) en définissant
+   le contrat `initialState` → `currentState`, puis la Phase 3 (worker, démarrage réel
+   de simulation, verrouillage UI via `worlds.status`).
 3. Ne pas implémenter interactions, relations, événements, mémoire, mort, LLM/OpenRouter
    avant les phases prévues.

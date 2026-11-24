@@ -2,6 +2,50 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 1 (suppression d'une instance de personnage)
+
+### Added
+- **Suppression d'instance** : service `deleteCharacterInstance(id, worldId)` dans
+  `world-store.service.ts` (validation des ids, garde `assertWorldPreparation`, contrôle
+  d'appartenance `id` + `world_id`, `DELETE` ciblé, resynchronisation du compteur,
+  persistance SQLite). Aucune modification de schéma ; le modèle et les autres mondes
+  ne sont jamais touchés.
+- **IPC/preload dédiés** : canal `character:delete` et méthode
+  `deleteCharacter(id, worldId): Promise<{ deleted: boolean }>` (ids validés côté main).
+- **UI** : action « Supprimer » sur chaque carte de personnage et « Supprimer ce personnage »
+  dans la fiche, composant `ConfirmDeleteCharacterDialog` (personnage et monde identifiés,
+  suppression définitive pour ce monde, annulation/confirmation), notification de succès,
+  affichage des erreurs IPC, retour automatique à la liste après suppression depuis la fiche.
+- **Tests** : `tests/character-deletion.test.ts` (13 cas service dont cross-world, statut
+  verrouillé, modèle conservé, compteur, persistance, ids invalides) et
+  `tests/character-deletion-ui.test.tsx` (5 cas jsdom dont annulation, actualisation,
+  retour à la liste, erreur IPC). Total 88/88 tests (8 fichiers).
+
+### Changed
+- `WorldView` : cartes converties en `<div>` avec bouton d'ouverture interne (plus de boutons
+  imbriqués), banners succès/erreur réutilisés, rafraîchissement liste + compteur après suppression.
+- `CharacterDetail` : prop optionnelle `onDelete` (absente pour les modèles de bibliothèque).
+- Documentation mise à jour : `PROGRESS.md`, `HANDOFF.md`, `README.md`,
+  `docs/CHARACTER_SYSTEM.md`, `docs/DATABASE.md`.
+- Smoke Electron réel (2 phases avec redémarrage) validé ; base utilisateur restaurée
+  byte-identique après nettoyage.
+
+### Fixed
+- Aucun bug applicatif. Faux échec du harness smoke B (valeur numérique testée avec
+  `.every(v === true)`) corrigé dans le script de test, séquence rejouée avec succès.
+
+### Removed
+- Rien.
+
+### Technical decisions
+- Suppression refusée côté main si `worlds.status !== 'preparation'`, sans dépendre d'un
+  masquage de bouton dans le renderer.
+- Double prédicat `id` + `world_id` sur le `DELETE`, précédé d'un `SELECT` d'appartenance :
+  une manipulation IPC ne peut viser que l'instance du monde demandé. Messages d'erreur
+  distincts : identifiants invalides / monde inexistant / personnage introuvable dans ce monde.
+- `template_id` reste informatif (pas de FK, pas de cascade) : supprimer une instance
+  n'affecte jamais le modèle ni ses autres instances.
+
 ## 2026-11-23 — Phase 1 (création manuelle de personnages + bibliothèque réutilisable)
 
 ### Added
