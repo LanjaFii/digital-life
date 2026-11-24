@@ -27,6 +27,13 @@
 - `docs/CHARACTER_TICK_RULES.md` : protocole snapshot → besoins projetés → émotions → agrégation → clamp/arrondi → application différée → transaction atomique + `persist` unique ; déterminisme/PRNG ; `TickDelta[]` ; contrats TS proposés ; 4 services purs ; calibration 24/72/168/720/plusieurs milliers de ticks ; 2 diagrammes Mermaid.
 - Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI, LLM, mort, relations, événements ou souvenirs touché.
 
+## État actuel (2026-11-24)
+
+- **Phase 3B implémentée, validée et prête à committer.** HEAD avant tranche : `a07d75a7f80c0d49a2e0c9475aa3254d64dd2cae`, branche `main`, arbre propre au démarrage.
+- Quatre services purs ajoutés + orchestration intégrée dans `stepSimulation` (une transaction, un `persist`). Aucun changement de schéma SQLite, worker, IPC, preload ou UI.
+- Tests : **148/148 passés** (15 fichiers), typecheck 4 configs OK, check-deps OK, build OK.
+- Prochaine action : finalisation Git (commit + push `origin/main` sans force + vérification hashes/arbre propre), puis arrêt. Ne pas démarrer la Phase 3C sans validation explicite.
+
 ## Décisions de conception Phase 3B
 
 - **Besoins projetés** : les émotions lisent les besoins projetés du tick courant comme entrée de calcul, sans application prématurée ; évite un retard artificiel d'une heure.
@@ -45,12 +52,18 @@
 - **`Date.now()` interdit dans les règles** : utilisé uniquement pour `createdAt/updatedAt`.
 - **Compatibilité statuts** : `simulation_started` accepté en lecture, normalisé en `simulation_running`.
 - **Sécurité Electron inchangée** : `contextIsolation`, `sandbox`, `nodeIntegration:false`, `webSecurity:true`, navigation externe refusée, aucun Node exposé au renderer.
+- **Précision Phase 3B** : valeurs stockées en centièmes (2 décimales) dans les colonnes JSON existantes ; `roundHalfEven` via `quantize()`. Raison : les petits deltas (`-0.05`) disparaîtraient en entiers et créeraient une stagnation artificielle.
+- **Coefficients Phase 3B** : conservés tels que documentés dans `SimulationParametersV1` (`version: 1`) ; la matrice émotionnelle qualitative a été convertie en poids numériques sans ajustement arbitraire.
+- **`safety`** : pas de déclin naturel, retour vers baseline 65 (`+0.2/tick`, modulé par `resilience`) ; alternative `-0.1/tick` rejetée comme artificielle sans événement.
+- **Anti-saturation** : la pression positive issue du confort est plafonnée par la marge vers la baseline (cause `baseline.headroom`). Décision prise après observation en simulation longue d'un `happiness` bloqué à 100 en ~50 ticks sur scénario stable. La pression négative (déficits) reste libre.
+- **Rollback testé** : hook `_setTickFailureForTests()` injecte une panne après écriture des personnages mais avant l'horloge ; le test vérifie que ni personnages ni horloge ne sont modifiés. Hook jamais utilisé en production.
+- **Écriture persistée** : `emotions_json`/`needs_json` (miroirs legacy) ET `current_emotions_json`/`current_needs_json` sont mis à jour ensemble ; `initial_*` reste immuable.
 
 ## Validation réalisée
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : OK.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : OK (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **102/102 OK** (10 fichiers).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **148/148 OK** (15 fichiers).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : OK.
 - **Smoke Electron réel Linux** (CDP, `--no-sandbox --disable-gpu`, 2 lancements) : création monde `SMOKE-SIM` (seed 123, 2 persos), start tick 0 running, pause, step -> 1, speed 10x, fermeture, relance restaurée tick 1/paused/rngState `2246822416`/`simulation_paused`, resume, step -> 2, suppression smoke, `SMOKE_OK`. DB utilisateur sauvegardée puis restaurée depuis `/tmp/dl-worlds-backup.sqlite`.
 
@@ -59,7 +72,8 @@
 - Le smoke test a modifié `data/saves/worlds.sqlite` pendant l'exécution ; la sauvegarde `/tmp/dl-worlds-backup.sqlite` a été restaurée. Vérifier que le DB n'est pas inclus dans le commit (gitignored).
 - `simulation_stopped` ne permet pas de redémarrage implicite : c'est volontaire. Si le produit veut "reprendre un monde arrêté", définir une transition explicite avant de l'implémenter.
 - Le worker est compilé en JS dans `dist/main/simulation/simulation.worker.js` ; `scripts/test.mjs` lance `tsc -p tsconfig.main.json` avant Vitest pour garantir sa présence.
-- Le tick n'applique aucune règle métier. Ne pas présenter la simulation comme autonome.
+- Le tick applique désormais des règles **passives** (besoins/émotions) mais aucune décision, action, relation, événement, souvenir, mort ni dialogue. Ne pas présenter la simulation comme autonome pour autant.
+- Les deltas détaillés sont calculés mais volontairement non exposés via IPC/UI dans cette tranche (volume) ; seule l'évolution des valeurs est visible naturellement dans la fiche personnage.
 
 ## Fichiers importants à examiner
 
@@ -73,7 +87,14 @@
 - `src/renderer/components/WorldView.tsx` — UI minimale contrôle simulation.
 - `tests/prng.test.ts`, `tests/simulation.test.ts`, `tests/phase0.test.ts`.
 - `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/DATABASE.md`, `docs/ARCHITECTURE.md`.
-- `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md` — conception Phase 3B (source de vérité pour l'implémentation future).
+- `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md` — conception Phase 3B (source de vérité, mise à jour au statut implémenté).
+- `src/shared/simulation-rules.ts` — contrats des règles et paramètres versionnés.
+- `src/main/services/simulation-parameters.service.ts` — coefficients par défaut (hypothèses configurables).
+- `src/main/services/personality-influence.service.ts` — maths pures, arrondi half-even, traits.
+- `src/main/services/needs-evolution.service.ts` — 8 besoins projetés + deltas.
+- `src/main/services/emotion-evolution.service.ts` — 10 émotions projetées + deltas.
+- `src/main/services/character-tick.service.ts` — orchestration déterministe du tick.
+- `tests/personality-influence.test.ts`, `tests/needs-evolution.test.ts`, `tests/emotion-evolution.test.ts`, `tests/character-tick.test.ts`, `tests/simulation-long.test.ts`, `tests/simulation-rules-fixtures.ts`.
 
 ## Commande de relance
 
@@ -93,7 +114,6 @@ bash scripts/dev.sh
 
 ## Prochaine tâche recommandée
 
-1. **Finaliser la tranche Git** : vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre.
-2. **Implémenter la Phase 3B (après validation de cette conception)** : services purs + application des deltas dans la même transaction que l'horloge, sans relations/événements/mémoires/décisions/actions/mort/LLM.
-3. **Trancher avant codage** : arrondi `roundHalfEven` vs half-up, précision `number` vs centièmes, calibres définitifs des coefficients (voir `docs/CHARACTER_TICK_RULES.md` §9).
-4. **Décision produit à trancher** : politique de reprise d'un monde `simulation_stopped` (nouvelle sauvegarde vs reprise explicite). Ne pas implémenter implicitement.
+1. **Finaliser la tranche Git** : vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre. **Arrêt à cette étape si le push échoue.**
+2. Ensuite uniquement après validation explicite : Phase 3C (décisions/actions autonomes) avec sa propre documentation de conception.
+3. **Décision produit toujours à trancher** : politique de reprise d'un monde `simulation_stopped` (nouvelle sauvegarde vs reprise explicite). Ne pas implémenter implicitement.

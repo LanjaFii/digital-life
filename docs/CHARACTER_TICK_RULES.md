@@ -1,8 +1,9 @@
 # Règles de tick personnage — conception Phase 3B
 
-> **Statut : proposition documentaire. Aucun code métier de tick n'est implémenté.**
-> Ce document définit le contrat futur d'évolution des personnages au tick (besoins + émotions).
-> Il ne modifie ni le moteur, ni le worker, ni SQLite, ni l'UI, ni les IPC.
+> **Statut : implémenté en Phase 3B.** Contrat d'évolution des personnages au tick (besoins + émotions).
+> Le moteur, le worker, le schéma SQLite, l'UI et les IPC restent inchangés.
+> Quatre services purs ont été ajoutés (`personality-influence`, `needs-evolution`,
+> `emotion-evolution`, `character-tick`) et `stepSimulation` les intègre dans la transaction existante.
 
 ## 1. Audit de l'existant (réel)
 
@@ -35,21 +36,26 @@
 
 ```mermaid
 flowchart TD
-    A[Début tick T] --> B[Charger snapshot cohérent<br/>horloge + personnages vivants + rngState]
-    B --> C[Ordre déterministe des personnages<br/>tri par id, localeCompare en numeric]
+    A[Début tick T] --> J[BEGIN TRANSACTION]
+    J --> B[Charger snapshot cohérent<br/>horloge + personnages + rngState]
+    B --> C[Ordre déterministe des personnages<br/>tri par identifiant, comparaison lexicographique]
     C --> D[Pour chaque personnage :<br/>calculer besoins depuis snapshot initial]
     D --> E[Calculer besoins projetés du tick<br/>valeurs candidates, non persistées]
     E --> F[Calculer émotions depuis snapshot initial<br/>+ besoins projetés en entrée de calcul uniquement]
     F --> G[Agréger deltas et causes explicables]
-    G --> H[Clamp 0..100 + arrondi convention défini]
+    G --> H[Clamp 0..100 + quantize aux centièmes<br/>arrondi half-even]
     H --> I[Application différée<br/>en mémoire, ordre déterministe]
-    I --> J[BEGIN TRANSACTION]
-    J --> K[Écrire currentState personnages]
+    I --> K[Écrire current_*_json et miroirs legacy personnages]
     K --> L[Écrire simulation_clock tick/day/hour/rngState]
     L --> M[COMMIT]
     M --> N[persist : db.export + writeFileSync unique]
     N --> O[Broadcast statut validé]
 ```
+
+> Ordre définitif Phase 3B : la transaction est ouverte **avant** le chargement de l'état,
+> conformément au protocole imposé. Le calcul pur reste isolé dans les services et ne
+> touche pas SQLite. Le tri utilise une comparaison lexicographique directe (`<`/`>`),
+> indépendante de la locale (plus stable que `localeCompare`).
 
 ### 3.2 Règle besoins projetés / émotions
 
@@ -98,12 +104,19 @@ Une transaction SQLite par tick contient :
 - **Phase 3B** : aucune consommation prévue. Si une future règle introduit une variabilité, elle doit : déclarer sa consommation, être documentée, testée par rejeu, et persister `rngState` après le dernier tirage du tick.
 - `lastProcessedOrder` reste 0 en Phase 3B sauf si un traitement intra-tick ordonné plus fin est introduit.
 
-### 4.3 Arrondi et précision
+### 4.3 Arrondi et précision — décisions définitives
 
-- Calcul interne : `number` (IEEE 754) acceptable en Phase 3B si les formules restent simples ; **provisoire**. Alternative plus robuste : centièmes entiers (`value * 100`).
-- Arrondi final de persistance : `roundHalfEven` vers entier 0-100 (proposé) pour limiter la dérive statistique longue. Alternative : `Math.round` half-up. **À trancher avant implémentation**.
-- Clamp final : `Math.min(100, Math.max(0, rounded))`.
-- Les valeurs persistées sont des entiers 0-100, comme le contrat actuel.
+- **Précision** : calcul interne en `number` IEEE 754, puis **quantification à 2 décimales**
+  (`SIMULATION_VALUE_PRECISION = 2`) au moment de l'application finale. Les valeurs
+  persistées sont des centièmes (ex. `79.28`), pas des entiers. Le stockage en entiers
+  ferait disparaître les petits deltas (`-0.05`, `-0.5`) et créerait une stagnation
+  artificielle. Aucun changement de schéma : les colonnes `*_json` acceptent déjà `number`.
+- **Arrondi** : `roundHalfEven` (half-even, symétrique), appliqué après mise à l'échelle
+  par `quantize(value, precision)`. `Math.round()` est exclu car asymétrique sur les
+  négatifs (`Math.round(-1.5) = -1` alors que `roundHalfEven(-1.5) = -2`).
+- **Clamp final** : `Math.min(100, Math.max(0, quantized))`.
+- **Contributions explicables** : la cause `rounding` est utilisée quand la quantification
+  modifie une valeur ; la cause `clamp` quand le bornage 0–100 intervient.
 
 ## 5. Explicabilité
 
@@ -121,7 +134,10 @@ interface TickDelta {
 }
 
 interface TickDeltaCause {
-  kind: 'need_deficit' | 'emotion_pressure' | 'trait_modifier' | 'baseline_recovery' | 'clamp';
+  kind:
+    | 'base_decay' | 'need_deficit' | 'comfort' | 'emotion_pressure'
+    | 'emotion_target' | 'trait_modifier' | 'baseline_recovery'
+    | 'clamp' | 'rounding';
   source: string;            // ex: "needs.sleep", "traits.resilience"
   weight?: number;
   contribution?: number;     // contribution au delta avant clamp
@@ -286,14 +302,20 @@ Contraintes :
 - Services purs, testables sans Electron/SQLite/renderer.
 - `TickDelta[]` pour explicabilité.
 
-### 9.2 Hypothèses provisoires
-- Arrondi `roundHalfEven` vers entiers (alternative half-up).
-- Calcul interne en `number` IEEE 754 (alternative centièmes entiers).
+### 9.2 Décisions définitives tranchées pendant l'implémentation
+- Précision aux centièmes (pas d'entiers) + arrondi `roundHalfEven` via `quantize`.
+- `safety` : pas de déclin naturel, retour vers baseline 65 (au lieu de `-0.1/tick`).
+- Pression positive bornée par la marge vers la baseline (anti-saturation observée à 50 ticks).
+- Matrice émotionnelle qualitative convertie en poids numériques configurables.
+- Tri par comparaison lexicographique directe plutôt que `localeCompare`.
+
+### 9.3 Hypothèses toujours configurables (non arbitrairement modifiées)
 - Baselines émotionnelles et taux/récupération proposés dans `EMOTION_EVOLUTION.md`.
 - Coefficients de dérive et influences proposés dans `NEEDS_EVOLUTION.md`.
 - Plafonds de delta/pression et zone morte de retour baseline.
+- Toutes ces valeurs résident dans `SimulationParametersV1` (`version: 1`).
 
-### 9.3 À calibrer par tests
+### 9.4 À calibrer par tests
 - Taux de dérive par besoin, surtout thirst/hunger/energy/sleep.
 - Force réelle de l'influence traits (éviter sur-déterminisme).
 - Poids besoin->émotion et émotion->émotion (anti-boucles).
@@ -301,7 +323,7 @@ Contraintes :
 - Longue dérive/arrondi sur 10 000 ticks.
 - Volume acceptable de deltas détaillés en persistance/logs.
 
-### 9.4 Liens
+### 9.5 Liens
 - `docs/NEEDS_EVOLUTION.md` — règles détaillées des 8 besoins.
 - `docs/EMOTION_EVOLUTION.md` — règles détaillées des 10 émotions.
 - `docs/SIMULATION_TIME_AND_ENGINE.md` — horloge, déterminisme, worker/main.

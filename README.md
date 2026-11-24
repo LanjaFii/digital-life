@@ -5,7 +5,7 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B conception documentaire terminée** (évolution besoins/émotions ; aucune implémentation).
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique). Comportements autonomes (décisions/actions/relations/mort/LLM) non implémentés.
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
 > tests (102/102), build et smoke test Electron réel Linux validés. Le code réel et `PROGRESS.md` font foi.
 
@@ -34,21 +34,21 @@ conséquences calculées par le moteur.
   (nom du personnage, monde, suppression définitive), annulation possible, liste et compteur
   actualisés, retour à la liste depuis la fiche. Refusée côté main hors préparation ;
   le modèle d'origine et les instances des autres mondes restent intacts (Phase 1).
-- **Infrastructure simulation Phase 3A** : horloge interne persistée (`simulation_clock`), PRNG sérialisable/restaurable, worker Node `worker_threads` piloté par le main, commandes IPC `start/pause/resume/step/setSpeed/stop/getStatus`, reprise après redémarrage (running → paused), UI minimale de contrôle du temps (jour/heure/tick/vitesse/statut). Aucun comportement autonome de personnage pour l'instant.
+- **Infrastructure simulation Phase 3A** : horloge interne persistée (`simulation_clock`), PRNG sérialisable/restaurable, worker Node `worker_threads` piloté par le main, commandes IPC `start/pause/resume/step/setSpeed/stop/getStatus`, reprise après redémarrage (running → paused), UI minimale de contrôle du temps (jour/heure/tick/vitesse/statut).
+- **Évolution Phase 3B** : à chaque tick, les 8 besoins et 10 émotions évoluent selon des règles déterministes et explicables (services purs, traits de personnalité, snapshot immuable, arrondi half-even aux centièmes), appliquées dans la même transaction SQLite que l'horloge. Le PRNG n'est pas consommé. Les valeurs actualisées sont visibles dans la fiche personnage ; aucune nouvelle UI.
 
-### Planifiées (phases 3B+ à 8)
-Évolution dynamique des personnages, décisions/actions autonomes, relations et mémoire,
-événements, mort et deuil, dialogues OpenRouter facultatifs, tableaux de bord et
-statistiques, packaging.
+### Planifiées (phases 3C à 8)
+Décisions/actions autonomes, relations et mémoire, événements, mort et deuil,
+dialogues OpenRouter facultatifs, tableaux de bord et statistiques, packaging.
 
-### Documentation de conception (documentaire uniquement)
+### Documentation de conception et de règles implémentées
 - [Architecture de l'état des personnages](docs/CHARACTER_STATE_ARCHITECTURE.md)
 - [Système de relations](docs/RELATIONSHIP_SYSTEM.md)
 - [Événements, historique et souvenirs](docs/EVENT_AND_MEMORY_SYSTEM.md)
 - [Temps interne, ticks et moteur](docs/SIMULATION_TIME_AND_ENGINE.md)
-- [Évolution des besoins (conception Phase 3B)](docs/NEEDS_EVOLUTION.md)
-- [Évolution des émotions (conception Phase 3B)](docs/EMOTION_EVOLUTION.md)
-- [Règles de tick personnage (conception Phase 3B)](docs/CHARACTER_TICK_RULES.md)
+- [Évolution des besoins (Phase 3B implémentée)](docs/NEEDS_EVOLUTION.md)
+- [Évolution des émotions (Phase 3B implémentée)](docs/EMOTION_EVOLUTION.md)
+- [Règles de tick personnage (Phase 3B implémentée)](docs/CHARACTER_TICK_RULES.md)
 
 ## Installation portable
 

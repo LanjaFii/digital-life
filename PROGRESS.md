@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3B — Conception du premier système d'évolution dynamique des personnages** (documentaire, terminée dans cette tranche ; aucune implémentation).
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B conception documentaire terminée ; comportements autonomes non implémentés.
+- **Phase** : **Phase 3B — Évolution déterministe des besoins et émotions** (implémentée dans cette tranche : services purs + intégration tick SQLite atomique).
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B **implémentée et validée** ; comportements autonomes (décisions/actions/relations/événements/mort/LLM) non implémentés.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `e0f6d0b1d032c841e5d5772098f6ab16e3b1f4dd` (`feat(phase3a): implement simulation clock infrastructure`).
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `a07d75a7f80c0d49a2e0c9475aa3254d64dd2cae` (`docs(phase3b): specify deterministic need and emotion evolution`).
 
 ## Fonctionnalités terminées
 
@@ -61,9 +61,24 @@
 - [x] `docs/CHARACTER_TICK_RULES.md` : protocole snapshot → besoins projetés → émotions → agrégation → clamp/arrondi → application différée → transaction atomique + `persist` unique ; déterminisme/PRNG ; `TickDelta[]` explicable ; contrats TS proposés ; 4 services purs futurs ; calibration 24/72/168/720/plusieurs milliers de ticks ; profils et critères d'échec ; 2 diagrammes Mermaid ; décisions définitives / provisoires / à calibrer.
 - [x] Aucun code applicatif, schéma SQLite, migration, worker, IPC, preload, UI, LLM, mort, relations, événements ou souvenirs modifié.
 
+## Phase 3B — Implémentation (terminée dans cette tranche)
+
+- [x] Audit préalable : git synchronisé (`a07d75a`), 3 docs lus intégralement, types/shared, `stepSimulation`, worker, manager, PRNG et tests existants examinés ; divergences documentées (coefficients émotionnels qualitatifs, arrondi/précision non tranchés, pas de `SimulationParameters`).
+- [x] Décisions numériques tranchées : précision décimale aux centièmes (pas d'entiers), arrondi bancaire symétrique `roundHalfEven` via `quantize`, coefficients documentés conservés comme valeurs configurables `SimulationParametersV1` (version 1).
+- [x] `src/shared/simulation-rules.ts` : contrats partagés (`CharacterTickInput`, `CharacterTickSnapshot`, `TickDelta`, `NeedDelta`, `EmotionDelta`, `CharacterTickResult`, causes incluant `base_decay`/`comfort`/`emotion_target`/`rounding`).
+- [x] `src/main/services/simulation-parameters.service.ts` : coefficients versionnés des 8 besoins / 10 émotions / plafonds / seuils, identifiés comme hypothèses de calibration.
+- [x] `src/main/services/personality-influence.service.ts` : helpers purs (clamp, half-even, quantize, traitFactor/Multiplier, pressions, baseline, finalizeValue).
+- [x] `src/main/services/needs-evolution.service.ts` : 8 besoins projetés depuis le snapshot, accélérateurs, récupérations santé/sécurité, plafond de perte, deltas explicables.
+- [x] `src/main/services/emotion-evolution.service.ts` : 10 émotions projetées depuis snapshot + besoins projetés, baselines personnelles, pressions bornées, zone morte, garde-fou anti-saturation.
+- [x] `src/main/services/character-tick.service.ts` : tri déterministe, orchestration pure, quantification finale, PRNG strictement conservé.
+- [x] Intégration `stepSimulation` : `BEGIN` avant chargement, snapshot immuable, calcul pur, écriture `current_*_json` + miroirs legacy, horloge, `COMMIT`, **un seul** `persist`, rollback complet sur erreur (hook de test injecté).
+- [x] Tests : services purs (maths, traits, besoins, émotions, orchestration), intégration SQLite (tick, pause/step, rollback, réouverture, recovery, bornes), simulations longues 24/72/168/720/3000 ticks et 6 profils documentés.
+- [x] Ajustement justifié observé en simulation longue : saturation de `happiness` à 100 en ~50 ticks sur scénario stable → pression positive plafonnée par la marge vers la baseline (cause `baseline.headroom`) ; documentation mise à jour. Aucun coefficient arbitrairement modifié.
+- [x] Documentation mise à jour : 3 docs de conception (statut implémenté + décisions définitives), PROGRESS, HANDOFF, CHANGELOG.
+
 ## Fonctionnalités non commencées
 
-- [ ] Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique — **non démarrée**.
+- [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
 - [ ] Phase 3B+ : décisions autonomes, objectifs, actions, conséquences.
 - [ ] Phases 4 à 8 : relations, événements, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
@@ -127,6 +142,20 @@ Ajouts tranche conception Phase 3B (documentaire uniquement) :
 - `docs/EMOTION_EVOLUTION.md`
 - `docs/CHARACTER_TICK_RULES.md`
 
+Ajouts tranche implémentation Phase 3B :
+- `src/shared/simulation-rules.ts`
+- `src/main/services/simulation-parameters.service.ts`
+- `src/main/services/personality-influence.service.ts`
+- `src/main/services/needs-evolution.service.ts`
+- `src/main/services/emotion-evolution.service.ts`
+- `src/main/services/character-tick.service.ts`
+- `tests/simulation-rules-fixtures.ts`
+- `tests/personality-influence.test.ts`
+- `tests/needs-evolution.test.ts`
+- `tests/emotion-evolution.test.ts`
+- `tests/character-tick.test.ts`
+- `tests/simulation-long.test.ts`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -139,15 +168,17 @@ Ajouts tranche conception Phase 3B (documentaire uniquement) :
 - Tranche conception Phase 2 (documentaire) : `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/RELATIONSHIP_SYSTEM.md` (réécrit/étendu), `docs/EVENT_AND_MEMORY_SYSTEM.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 - Tranche Phase 3A (infrastructure simulation) : `src/main/services/prng.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/world.ipc.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/ipc.ts`, `src/shared/world.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/UseInWorldDialog.tsx`, `src/renderer/styles/global.css`, `scripts/test.mjs`, `tests/phase0.test.ts`, `tests/character-library.test.ts`, `tests/character-library-ui.test.tsx`, `tests/character-deletion-ui.test.tsx`, `tests/world-resume-ui.test.tsx`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/DEVELOPMENT.md`, `README.md`, `CHANGELOG.md`, `PROGRESS.md`, `HANDOFF.md`.
 - Tranche conception Phase 3B (documentaire) : `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (liens docs uniquement, si pertinent). Aucun fichier applicatif modifié.
+- Tranche implémentation Phase 3B : `src/main/services/world-store.service.ts` (tick atomique + hook de test rollback), `tests/simulation.test.ts` (intégration SQLite), `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (si mention Phase 3B).
 
 ## Tests réussis
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **102/102 passés** (10 fichiers).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **148/148 passés** (15 fichiers, dont les nouveaux tests Phase 3B).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : **OK**.
 - **Validation tranche conception Phase 3B (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **102/102 passés** (10 fichiers, aucun code modifié), build OK. Vérification croisée : 21 traits / 10 émotions / 8 besoins présents, 13 traits utilisés et 8 exclus avec justification, 2 diagrammes Mermaid, 5 liens de documentation valides.
 - **Smoke Electron réel Linux** (2026-11-24, `--no-sandbox --disable-gpu`, CDP, 2 lancements avec redémarrage réel) : création monde `SMOKE-SIM` (seed 123, 2 personnages), start tick 0 running, pause, step -> tick 1, vitesse 10x, fermeture, relance restaurée (tick 1, paused, `rngState=2246822416`, world `simulation_paused`), resume, step -> tick 2, suppression monde smoke, `SMOKE_OK`. DB utilisateur sauvegardée/restaurée (`/tmp/dl-worlds-backup.sqlite`) avant commit.
+- **Validation tranche implémentation Phase 3B** : check-deps OK, typecheck 4 configs OK, tests **148/148 passés** (15 fichiers), build OK. Simulations longes 24/72/168/720/3000 ticks + 6 profils documentés : bornes 0–100 respectées, déterminisme confirmé, pas d'oscillation artificielle ni de saturation sans cause active, PRNG inchangé.
 ## Tests échoués
 
 - Aucun.
@@ -166,4 +197,4 @@ Ajouts tranche conception Phase 3B (documentaire uniquement) :
 
 ## Prochaine tâche précise
 
-La conception Phase 3B est terminée et validée documentairement. Prochaine étape : **implémenter** les règles conçues dans un tick atomique (services purs `personality-influence` / `needs-evolution` / `emotion-evolution` / `character-tick`, application dans la même transaction que l'horloge), après validation explicite de cette tranche documentaire. Ne pas démarrer décisions/actions/relations/événements/souvenirs/mort/LLM. Trancher avant implémentation : arrondi `roundHalfEven` vs half-up, précision `number` vs centièmes, calibres définitifs des coefficients. Voir HANDOFF.md pour la recommandation détaillée.
+Finaliser la tranche Git (vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre). Ensuite uniquement sur validation explicite : Phase 3C (décisions/actions autonomes) ou reprise d'un monde `simulation_stopped` (transition explicite à définir avant implémentation). Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.

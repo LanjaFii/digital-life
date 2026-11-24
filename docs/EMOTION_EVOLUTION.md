@@ -1,7 +1,9 @@
 # Évolution des émotions — conception Phase 3B
 
-> **Statut : proposition documentaire. Aucun code de simulation métier n'est implémenté.**
-> Définit les règles futures d'évolution des 10 émotions au tick, sans décisions autonomes.
+> **Statut : implémenté en Phase 3B (services purs + intégration tick SQLite).**
+> Définit les règles d'évolution des 10 émotions au tick, sans décisions autonomes.
+> Les poids qualitatifs de la matrice §6 ont été convertis en coefficients numériques
+> dans `simulation-parameters.service.ts` ; ils restent des hypothèses configurables.
 
 ## 1. Audit de l'existant
 
@@ -15,7 +17,9 @@
 ## 2. Principes
 
 1. **Pas d'automatisme simpliste** : un besoin bas ne mappe pas 1:1 à une émotion; on utilise influences pondérées, seuils et récupération.
-2. **Snapshot** : toutes les émotions lisent `snapshot.needs`, `snapshot.emotions`, `snapshot.traits`.
+2. **Snapshot** : toutes les émotions lisent `snapshot.emotions`, `snapshot.traits`
+   et les **besoins projetés du tick courant** (décision définitive de `CHARACTER_TICK_RULES.md` §3.2),
+   jamais les besoins déjà persistés.
 3. **Application différée** : les deltas émotionnels sont calculés puis appliqués ensemble; une émotion ne modifie pas une autre pendant la phase de calcul.
 4. **Retour vers baseline** : chaque émotion a une baseline personnelle dérivée de traits/état initial (ou valeur neutre), avec vitesse de retour limitée.
 5. **Bornes** : clamp 0-100 après calcul.
@@ -164,14 +168,22 @@ Légende : `++` fort, `+` moyen, `~` faible, vide = non retenu par défaut.
 | Socialization | - | ++ | ~ | ~ |  |  | ~ | ++ | ~ | - |
 | Safety | - | ~ | ++ | ++ | + | ++ | -- |  | - | -- |
 
-> Matrice de départ à calibrer. Les signes indiquent le sens de l'effet quand le besoin est bas.
+> Matrice de départ convertie en coefficients numériques dans `SimulationParametersV1` :
+> `++ ≈ ±0.8`, `+ ≈ ±0.4`, `~ ≈ ±0.2` (besoins), "`--` ≈ ±0.5" (confort).
+> Ces valeurs restent des **hypothèses configurables**, pas des vérités calibrées.
+> Les signes indiquent le sens de l'effet quand le besoin est bas.
 
 ## 7. Anti-boucles et garde-fous
 
 - **Pas d'écriture croisée pendant le calcul** : émotions lisent le snapshot, écrivent des deltas.
-- **Plafond de pression totale** : `pressure_e` borné (ex. [-8, +8] pts/tick avant modulation). **Provisoire**.
-- **Plafond de delta final** : ex. [-10, +10] pts/tick. **Provisoire**.
-- **Récupération minimale** : éviter oscillation autour de baseline avec zone morte `|baseline-current| < 0.5`.
+- **Plafond de pression totale** : `pressure_e` borné à `[-8, +8]` pts/tick (`caps.emotionPressure`). Configurable.
+- **Plafond de delta final** : `[-10, +10]` pts/tick (`caps.emotionDelta`). Configurable.
+- **Anti-saturation (décision Phase 3B)** : la pression **positive** issue du confort est plafonnée
+  par la marge restante vers la baseline personnelle. Sans cette garde-fou, un scénario stable
+  saturait `happiness` à 100 en ~50 ticks (observé en simulation longue). La pression
+  **négative** (déficits persistants) reste libre : elle doit pouvoir abaisser durablement
+  l'émotion. Cause associée : `clamp / baseline.headroom`.
+- **Récupération minimale** : zone morte `|baseline-current| < 0.5` (`emotionDeadZone`). Configurable.
 - **Couplage émotion->besoin** : en Phase 3B, limité à stress/anxiety influençant sleep/energy/safety faiblement, avec plafonds stricts.
 
 ## 8. Tests à prévoir

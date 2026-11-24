@@ -2,6 +2,39 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3B (implémentation de l'évolution déterministe des besoins et émotions)
+
+### Added
+- `src/shared/simulation-rules.ts` : contrats partagés des règles de tick (`SimulationParametersV1`, `CharacterTickInput/Snapshot/Result`, `TickDelta`, `NeedDelta`, `EmotionDelta`, causes explicables).
+- `src/main/services/simulation-parameters.service.ts` : `DEFAULT_SIMULATION_PARAMETERS` (coefficients des 8 besoins, 10 émotions, seuils, plafonds) identifiés comme hypothèses configurables.
+- `src/main/services/personality-influence.service.ts` : maths pures (clamp, `roundHalfEven`, `quantize`, facteurs/multiplicateurs de traits, pressions, baseline émotionnelle).
+- `src/main/services/needs-evolution.service.ts` : projection des 8 besoins depuis le snapshot (décroissance, modificateurs de traits, accélérateurs, récupérations santé/sécurité, plafond de perte) avec deltas explicables.
+- `src/main/services/emotion-evolution.service.ts` : projection des 10 émotions depuis le snapshot + besoins projetés (déficits, confort, pressions croisées, cibles, baseline personnelle, zone morte, plafonds, garde-fou anti-saturation).
+- `src/main/services/character-tick.service.ts` : orchestration pure, tri déterministe des personnages, quantification finale aux centièmes, conservation stricte du PRNG.
+- Tests : `tests/personality-influence.test.ts`, `tests/needs-evolution.test.ts`, `tests/emotion-evolution.test.ts`, `tests/character-tick.test.ts`, `tests/simulation-long.test.ts`, `tests/simulation-rules-fixtures.ts` ; intégration SQLite étendue dans `tests/simulation.test.ts` (rollback, réouverture, recovery, pause/step).
+
+### Changed
+- `stepSimulation` (`src/main/services/world-store.service.ts`) applique désormais l'évolution des personnages et l'horloge dans **une seule transaction** et **un seul `persist`** : `BEGIN` avant chargement du snapshot, calcul pur, écriture des `current_*_json` + miroirs legacy, `COMMIT`, rollback complet sur erreur. `initial_*` reste immuable.
+- `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md` : statut « implémenté », décisions définitives de précision/arrondi/safety/anti-saturation, causes de deltas enrichies, protocole de transaction corrigé.
+- `PROGRESS.md`, `HANDOFF.md` mis à jour.
+
+### Fixed
+- **Stagnation des petits deltas** : passage des entiers aux centièmes (précision 2, `quantize` half-even) ; des deltas comme `-0.05` ne disparaissent plus à l'arrondi.
+- **Asymétrie de `Math.round()`** sur les négatifs : `roundHalfEven()` symétrique (`-1.5 → -2`) avec tests des cas limites (`±0.5`, `±1.5`, `±2.5`).
+- **Saturation artificielle de `happiness` à 100** observée vers 50 ticks sur scénario stable : pression positive plafonnée par la marge vers la baseline (cause `clamp/baseline.headroom`). Coefficients non modifiés arbitrairement.
+- **Définition de `deficitPressure()`** : seuil interprété en points 0–100 comme les autres seuils (avant : mélange fraction/points).
+
+### Removed
+- Aucun.
+
+### Technical decisions
+- **Aucun changement de schéma SQLite** : les colonnes JSON existantes stockent déjà des `number` ; ni migration, ni worker, ni IPC, ni preload, ni UI modifiés.
+- **Aucun PRNG consommé** : `rngState` strictement conservé ; aucun `Date.now()`/`Math.random()` dans les règles métier (horodatages de persistance uniquement).
+- **Aucune autonomie ajoutée** : pas de décision, action, déplacement, relation, événement, souvenir, mort ni LLM/OpenRouter. Deltas détaillés non exposés via IPC/UI (volume).
+- **Coefficients documentés conservés** : matrice émotionnelle qualitative convertie en poids numériques, tous configurables dans `SimulationParametersV1` ; validée par simulations longues 24/72/168/720/3000 ticks et six profils documentés.
+- **Rollback vérifié** : hook de test `_setTickFailureForTests()` injecte une panne avant l'écriture de l'horloge ; ni personnages ni horloge ne sont modifiés. Hook non utilisé en production.
+- Validations : check-deps OK, typecheck 4 configs OK, tests **148/148** (15 fichiers), build OK.
+
 ## 2026-11-24 — Phase 3B (conception du premier système d'évolution dynamique, documentaire)
 
 ### Added

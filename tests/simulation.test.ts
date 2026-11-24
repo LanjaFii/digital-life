@@ -22,9 +22,11 @@ vi.mock('../src/main/services/resource.service', () => ({
 
 import {
   _resetWorldStoreForTests,
+  _setTickFailureForTests,
   createWorld,
   getSimulationStatus,
   getWorld,
+  listCharacters,
   pauseSimulation,
   recoverSimulationClocksAfterRestart,
   resumeSimulation,
@@ -41,6 +43,7 @@ function clearDb() {
 }
 
 beforeEach(async () => {
+  _setTickFailureForTests(null);
   clearDb();
   await _resetWorldStoreForTests();
 });
@@ -158,5 +161,101 @@ describe('Simulation clock (store)', () => {
       worldId: world.id, firstName:'X', lastName:'Y', age:20, gender:'male', biography:'b',
       traits: character.initialState.traits, emotions: character.initialState.emotions, needs: character.initialState.needs, goals: character.initialState.goals,
     })).rejects.toThrow(/verrouillés/);
+  });
+});
+
+/** Fabrique un monde avec un personnage aux valeurs connues, prêt à simuler. */
+async function createSimWorld(seed = 42) {
+  const world = await createWorld({ name: 'Phase3B', generationMode: 'random', characterCount: 1, seed });
+  const characters = (await listCharacters(world.id)).characters;
+  expect(characters).toHaveLength(1);
+  await startSimulation(world.id, 1);
+  return { world, character: characters[0] };
+}
+
+describe('Tick Phase 3B — intégration SQLite', () => {
+  it('un tick fait évoluer besoins et émotions et avance l’horloge d’exactement un', async () => {
+    const { world, character } = await createSimWorld();
+    const before = await getSimulationStatus(world.id);
+    await stepSimulation(world.id);
+    const after = await getSimulationStatus(world.id);
+    expect(after.clock?.tick).toBe((before.clock?.tick ?? 0) + 1);
+
+    const updated = (await listCharacters(world.id)).characters[0];
+    expect(updated.currentState.needs.hunger).toBeLessThan(character.currentState.needs.hunger);
+    expect(updated.currentState.needs.thirst).toBeLessThan(character.currentState.needs.thirst);
+    expect(updated.initialState.needs).toEqual(character.initialState.needs);
+    // Au moins une émotion évolue.
+    expect(updated.currentState.emotions).not.toEqual(character.currentState.emotions);
+  });
+
+  it('applique exactement un tick avec step en pause, puis conserve le PRNG', async () => {
+    const { world } = await createSimWorld();
+    const clock = (await getSimulationStatus(world.id)).clock!;
+    await pauseSimulation(world.id);
+    await stepSimulation(world.id);
+    const after = (await getSimulationStatus(world.id)).clock!;
+    expect(after.tick).toBe(clock.tick + 1);
+    expect(after.status).toBe('paused');
+    expect((await getSimulationStatus(world.id)).worldStatus).toBe('simulation_paused');
+    expect(after.rngState).toBe(clock.rngState); // Phase 3B : aucune consommation
+    expect(after.lastProcessedOrder).toBe(0);
+    await resumeSimulation(world.id);
+    expect((await getSimulationStatus(world.id)).worldStatus).toBe('simulation_running');
+  });
+
+  it('une erreur pendant le tick provoque un rollback complet (personnages + horloge)', async () => {
+    const { world, character } = await createSimWorld();
+    const before = (await getSimulationStatus(world.id)).clock!;
+    _setTickFailureForTests(() => { throw new Error('panne injectée'); });
+    await expect(stepSimulation(world.id)).rejects.toThrow('panne injectée');
+    _setTickFailureForTests(null);
+
+    const after = (await getSimulationStatus(world.id)).clock!;
+    expect(after.tick).toBe(before.tick);
+    expect(after.rngState).toBe(before.rngState);
+    const unchanged = (await listCharacters(world.id)).characters[0];
+    expect(unchanged.currentState.needs).toEqual(character.currentState.needs);
+    expect(unchanged.currentState.emotions).toEqual(character.currentState.emotions);
+  });
+
+  it('les états et l’horloge restent cohérents après fermeture et réouverture', async () => {
+    const { world } = await createSimWorld();
+    await stepSimulation(world.id);
+    await stepSimulation(world.id);
+    const beforeClock = (await getSimulationStatus(world.id)).clock!;
+    const beforeChars = (await listCharacters(world.id)).characters;
+
+    await _resetWorldStoreForTests(); // ferme la base, sans effacer les fichiers
+    const afterClock = (await getSimulationStatus(world.id)).clock!;
+    const afterChars = (await listCharacters(world.id)).characters;
+    expect(afterClock.tick).toBe(beforeClock.tick);
+    expect(afterClock.rngState).toBe(beforeClock.rngState);
+    expect(afterChars.map((c) => c.currentState)).toEqual(beforeChars.map((c) => c.currentState));
+  });
+
+  it('la récupération au redémarrage met en pause les horloges running', async () => {
+    const { world } = await createSimWorld();
+    await stepSimulation(world.id);
+    await recoverSimulationClocksAfterRestart();
+    const status = await getSimulationStatus(world.id);
+    expect(status.worldStatus).toBe('simulation_paused');
+    expect(status.clock?.status).toBe('paused');
+  });
+
+  it('plusieurs ticks consécutifs restent déterministes et bornés', async () => {
+    const { world } = await createSimWorld(7);
+    for (let i = 0; i < 24; i++) await stepSimulation(world.id);
+    const clock = (await getSimulationStatus(world.id)).clock!;
+    expect(clock.tick).toBe(24);
+    const character = (await listCharacters(world.id)).characters[0];
+    for (const value of Object.values(character.currentState.needs)) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(100);
+    }
+    for (const value of Object.values(character.currentState.emotions)) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(100);
+    }
   });
 });

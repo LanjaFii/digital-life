@@ -5,7 +5,9 @@ import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
 import { randomUUID, randomInt } from 'node:crypto';
 import type {
   CharacterDraft,
+  CharacterEmotions,
   CharacterInstance,
+  CharacterNeeds,
   CharacterListResult,
   CharacterTemplate,
   CharacterTemplateListResult,
@@ -27,12 +29,22 @@ import {
   type SimulationSpeed,
   type SimulationStatusView,
 } from '../../shared/simulation';
+import type { CharacterTickSnapshot } from '../../shared/simulation-rules';
+import { computeCharacterTick } from './character-tick.service';
 import { generateCharactersForWorld } from './character-generator.service';
 import { validateCharacterDraft } from './character-validation.service';
 import { getWasmPath } from './resource.service';
+import { DEFAULT_SIMULATION_PARAMETERS } from './simulation-parameters.service';
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 let dbPromise: Promise<Database> | null = null;
+
+/**
+ * Hook de test : injecte une erreur après l'écriture des personnages mais avant
+ * l'écriture de l'horloge, afin de vérifier le rollback atomique du tick.
+ * Jamais utilisé en production (aucun appel hors tests).
+ */
+let tickFailureForTests: (() => void) | null = null;
 
 function getDataDir(): string {
   const base = app.isPackaged ? app.getPath('userData') : app.getAppPath();
@@ -1039,25 +1051,90 @@ export async function setSimulationSpeed(worldId: string, speed: unknown): Promi
   }
 }
 
+/** Charge les personnages du monde dans la transaction courante. */
+function loadTickSnapshots(db: Database, worldId: string): CharacterTickSnapshot[] {
+  const stmt = db.prepare('SELECT * FROM characters WHERE world_id = ? ORDER BY id ASC');
+  stmt.bind([worldId]);
+  const snapshots: CharacterTickSnapshot[] = [];
+  while (stmt.step()) {
+    const character = rowToCharacter(stmt.getAsObject());
+    snapshots.push({
+      characterId: character.id,
+      traits: character.currentState.traits,
+      needs: character.currentState.needs,
+      emotions: character.currentState.emotions,
+      goals: character.currentState.goals,
+    });
+  }
+  stmt.free();
+  return snapshots;
+}
+
+/** Écrit les états calculés dans la transaction courante, en ordre déterministe. */
+function writeTickCharacterStates(
+  db: Database,
+  states: Array<{ characterId: string; needs: CharacterNeeds; emotions: CharacterEmotions }>,
+  updatedAt: string,
+): void {
+  const sorted = [...states].sort((a, b) => (a.characterId < b.characterId ? -1 : a.characterId > b.characterId ? 1 : 0));
+  const stmt = db.prepare(`
+    UPDATE characters
+    SET emotions_json=?, needs_json=?,
+        current_emotions_json=?, current_needs_json=?,
+        updated_at=?
+    WHERE id=?
+  `);
+  for (const state of sorted) {
+    const emotionsJson = JSON.stringify(state.emotions);
+    const needsJson = JSON.stringify(state.needs);
+    stmt.run([emotionsJson, needsJson, emotionsJson, needsJson, updatedAt, state.characterId]);
+  }
+  stmt.free();
+}
+
 /**
- * Applique exactement un tick. Le tick n'altère aucun personnage pour l'instant
- * (Phase 3A infrastructure) ; il avance uniquement l'horloge de façon atomique.
+ * Applique exactement un tick : évolution passive des besoins/émotions et
+ * avance de l'horloge dans une seule transaction SQLite et un seul `persist`.
+ * Le PRNG n'est pas consommé (Phase 3B). Aucun effet partiel en cas d'erreur.
  */
 export async function stepSimulation(worldId: string): Promise<SimulationStatusView> {
   const id = assertValidWorldId(worldId);
   const db = await getDb();
+  // Validations d'entrée avant ouverture de la transaction (aucune mutation).
   const world = getWorldOrThrow(db, id);
   const status = normalizeWorldSimulationStatus(world.status);
-  const clockRow = getSimulationClockRow(db, id);
-  if (!clockRow || (status !== 'simulation_running' && status !== 'simulation_paused')) {
+  const preflightClock = getSimulationClockRow(db, id);
+  if (!preflightClock || (status !== 'simulation_running' && status !== 'simulation_paused')) {
     throw new Error('La simulation doit être démarrée pour exécuter un tick.');
   }
-  const prev = clockRowToClock(clockRow);
-  const now = new Date().toISOString();
-  const nextTick = prev.tick + 1;
-  const { day, hour } = deriveDayHour(nextTick);
+
+  // Protocole : BEGIN avant tout chargement cohérent de l'état du tick.
   db.run('BEGIN TRANSACTION;');
   try {
+    const clockRow = getSimulationClockRow(db, id);
+    if (!clockRow) throw new Error('Horloge de simulation introuvable pendant le tick.');
+    const prev = clockRowToClock(clockRow);
+    const snapshots = loadTickSnapshots(db, id);
+    const nextTick = prev.tick + 1;
+    const { day, hour } = deriveDayHour(nextTick);
+
+    // Calcul purement mémoire : aucun état n'est modifié avant cette étape.
+    const result = computeCharacterTick({
+      worldId: id,
+      tick: nextTick,
+      day,
+      hour,
+      seed: simulationSeed(world.seed),
+      rngState: prev.rngState,
+      characters: snapshots,
+      params: DEFAULT_SIMULATION_PARAMETERS,
+    });
+
+    const now = new Date().toISOString();
+    writeTickCharacterStates(db, result.characterStates, now);
+
+    if (tickFailureForTests) tickFailureForTests();
+
     upsertClock(db, {
       ...prev,
       tick: nextTick,
@@ -1065,10 +1142,11 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
       hour,
       // step en pause conserve la pause ; step en running conserve running
       status: prev.status,
+      // Aucune règle ne consomme le PRNG en Phase 3B : état strictement conservé.
+      rngState: result.rngState >>> 0,
       lastProcessedOrder: 0,
       updatedAt: now,
     });
-    // Le statut du monde reste cohérent avec l'horloge.
     setWorldStatus(db, id, prev.status === 'running' ? 'simulation_running' : 'simulation_paused', now);
     db.run('COMMIT;');
     persist(db);
@@ -1077,6 +1155,11 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
     try { db.run('ROLLBACK;'); } catch { /* ignore */ }
     throw error;
   }
+}
+
+/** Test uniquement : injecte une panne avant l'écriture de l'horloge. */
+export function _setTickFailureForTests(hook: (() => void) | null): void {
+  tickFailureForTests = hook;
 }
 
 /** Test/utilitaire : force l'horloge pour des scénarios déterministes. */

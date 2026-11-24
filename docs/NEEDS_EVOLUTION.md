@@ -1,8 +1,10 @@
 # Évolution des besoins — conception Phase 3B
 
-> **Statut : proposition documentaire. Aucun code de simulation métier n'est implémenté.**
-> Cette tranche définit les règles futures d'évolution des 8 besoins au tick. Elle ne modifie
-> ni le moteur, ni le worker, ni SQLite, ni l'UI, ni les personnages.
+> **Statut : implémenté en Phase 3B (services purs + intégration tick SQLite).**
+> Ce document définissait les règles d'évolution des 8 besoins au tick. Les règles sont
+> désormais opérationnelles dans `needs-evolution.service.ts`, avec les coefficients
+> versionnés de `simulation-parameters.service.ts`. Le moteur, le worker, le schéma SQLite,
+> l'UI et les IPC restent inchangés.
 
 ## 1. Audit de l'existant (réel)
 
@@ -19,7 +21,10 @@
 
 ### 2.1 Convention
 
-- **Échelle** : `0..100`, entier en persistance.
+- **Échelle** : `0..100`, **décimal contrôlé à 2 décimales (centièmes)** en persistance.
+  Décision définitive Phase 3B : le stockage en entiers ferait disparaître des deltas
+  comme `-0.05` ou `-0.5` et provoquerait une stagnation artificielle. Les colonnes JSON
+  existantes acceptent déjà des `number` ; aucun changement de schéma n'était nécessaire.
 - **Sens** : `100 = besoin satisfait/comblé`, `0 = besoin critique/vide`.
 - **Tick** : 1 tick = 1 heure simulée. Les taux ci-dessous sont des points par tick sauf mention contraire.
 
@@ -38,7 +43,9 @@ next_b = clamp(roundHalfEven(raw_b), 0, 100)
 
 - `deficit_n = (100 - snapshot.needs[n]) / 100` ∈ [0,1].
 - `traitFactor_t = (snapshot.traits[t] - 50) / 50` ∈ [-1,1].
-- `roundHalfEven` : arrondi bancaire, limite la dérive statistique sur longues simulations. **Provisoire** (alternative : arrondi half-up, ou stockage interne en centièmes).
+- `roundHalfEven` : **décision définitive** — arrondi bancaire symétrique (`roundHalfEven(-1.5) = -2`,
+  contrairement à `Math.round`). Appliqué via `quantize(value, 2)` aux centièmes.
+  Évite le biais asymétrique de `Math.round()` sur les valeurs négatives.
 - **Saturation** : `clamp` après calcul complet du tick, jamais pendant les calculs inter-besoins (les interactions lisent le snapshot).
 
 ### 2.3 Décision de conception
@@ -49,8 +56,9 @@ next_b = clamp(roundHalfEven(raw_b), 0, 100)
 | Pas de PRNG pour la dérive naturelle | Définitif | Aucun besoin d'aléa pour une dérive horaire ; reproductibilité maximale. |
 | `100 = satisfait` | Définitif | Contrat existant. |
 | Taux par tick (1h) | Définitif | Aligné sur `SimulationClock`. |
-| Coefficients numériques | Provisoires | À calibrer par simulation longue avant implémentation. |
-| Arrondi half-even au stockage | Provisoire | À confirmer avec tests de dérive longue. |
+| Coefficients numériques | Configurables (`SimulationParametersV1`) | Hypothèses documentées, conservées telles quelles ; simulées sur 24/72/168/720/3000 ticks. |
+| Précision décimale (centièmes) | **Définitif** | Évite la stagnation des petits deltas ; compatible avec les types `number` existants. |
+| Arrondi half-even | **Définitif** | Symétrique pour positifs/négatifs ; testé sur les cas limites. |
 
 ## 3. Règles par besoin
 
@@ -146,7 +154,9 @@ next_b = clamp(roundHalfEven(raw_b), 0, 100)
 ### 3.8 Safety (sécurité)
 
 - **Sens** : sentiment de sécurité matérielle/physique/environnementale. 100 = en sécurité, 0 = danger perçu fort.
-- **Évolution naturelle** : très lentement variable, plutôt stable sans événement. Proposition : `-0.1 / tick` vers léger déclin ou `0` avec retour vers baseline personnelle. **Décision à trancher**.
+- **Évolution naturelle** : **décision tranchée** — `0 / tick` avec retour lent (`+0.2/tick`, modulé par
+  `resilience`) vers une baseline personnelle de 65 quand aucun facteur négatif n'est actif.
+  L'alternative `-0.1/tick` était artificielle sans événement modélisé.
 - **Influences personnalité** :
   - `courage` (+) : atténue les pertes, favorise stabilité.
   - `timidity` (-) : augmente sensibilité aux pertes.
@@ -235,9 +245,9 @@ Ces valeurs sont **provisoires**. Elles doivent être validées par simulation l
 - Les couplages émotion->besoin (stress impactant sleep) créent un risque de boucle ; les appliquer avec plafond et sur snapshot.
 - `safety` est difficile sans événements/environnement ; garder un modèle minimal en Phase 3B.
 
-## 8. Tests à prévoir (implémentation future)
+## 8. Tests (implémentés en Phase 3B)
 
-- Bornes 0-100 respectées sur 10 000 ticks.
+- Bornes 0-100 respectées sur 3000 ticks (horizons 24/72/168/720/3000 couverts).
 - Même snapshot + seed => mêmes deltas.
 - Aucun PRNG consommé si règles passives pures.
 - Hunger/thirst décroissent plus vite avec profils impulsifs (faible écart) qu'avec disciplinés, à état initial égal.
