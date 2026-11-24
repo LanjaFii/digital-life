@@ -406,6 +406,10 @@ describe('Tick Phase 3C — intégration SQLite', () => {
     }
   });
 
+  // 3D-A : chaque tick persiste désormais un enregistrement compressé par
+  // personnage dans la même transaction. `persist()` réexportant toute la base,
+  // le coût croît avec le nombre d'enregistrements. Le test vérifie l'octet pour
+  // octet, pas un budget de performance : 30 s couvrent la simulation longue.
   it('current_goals_json reste inchangé octet pour octet sur une longue simulation', async () => {
     const { world, characters } = await createPhase3CWorld({ hunger: 40, sleep: 40 }, 3);
     const before = (await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentGoalsJson;
@@ -413,5 +417,5 @@ describe('Tick Phase 3C — intégration SQLite', () => {
     const after = (await _getCharacterJsonColumnsForTests(world.id, characters[0].id)).currentGoalsJson;
     expect(after).toBe(before);
     expect((await getSimulationStatus(world.id)).clock?.tick).toBe(200);
-  });
+  }, 30_000);
 });

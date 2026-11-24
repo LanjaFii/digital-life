@@ -33,8 +33,22 @@ import {
   DEFAULT_CHARACTER_ACTION_RUNTIME_JSON,
   type CharacterActionRuntime,
 } from '../../shared/action';
+import type { DecisionRecordPayloadV1, DecisionRecordV1 } from '../../shared/decision';
 import type { CharacterTickSnapshot } from '../../shared/simulation-rules';
 import { computeCharacterTick } from './character-tick.service';
+import {
+  countDecisionRecords,
+  ensureDecisionHistorySchema,
+  getDecisionRecord,
+  getDecisionRecordRows,
+  insertDecisionRecords,
+  listDecisionRecords,
+  type DecisionHistoryReadQuery,
+} from './decision-history.store';
+import {
+  canonicalize,
+  finalizeDecisionRecord,
+} from './decision-record.service';
 import { generateCharactersForWorld } from './character-generator.service';
 import { validateCharacterDraft } from './character-validation.service';
 import { getWasmPath } from './resource.service';
@@ -203,6 +217,9 @@ function ensureSchema(db: Database): void {
 
   // Index sur template_id créé après migration additive (bases existantes sans la colonne).
   db.run(`CREATE INDEX IF NOT EXISTS idx_characters_template_id ON characters(template_id);`);
+
+  // Phase 3D-A : historique additif. Les migrations existantes restent actives.
+  ensureDecisionHistorySchema(db);
 }
 
 function persist(db: Database): void {
@@ -1104,15 +1121,21 @@ export async function setSimulationSpeed(worldId: string, speed: unknown): Promi
 function loadTickSnapshots(
   db: Database,
   worldId: string,
-): { snapshots: CharacterTickSnapshot[]; actionRuntimeByCharacter: Record<string, CharacterActionRuntime> } {
+): {
+  snapshots: CharacterTickSnapshot[];
+  actionRuntimeByCharacter: Record<string, CharacterActionRuntime>;
+  characterNameByCharacterId: Record<string, string>;
+} {
   const stmt = db.prepare('SELECT * FROM characters WHERE world_id = ? ORDER BY id ASC');
   stmt.bind([worldId]);
   const snapshots: CharacterTickSnapshot[] = [];
   const actionRuntimeByCharacter: Record<string, CharacterActionRuntime> = {};
+  const characterNameByCharacterId: Record<string, string> = {};
   while (stmt.step()) {
     const row = stmt.getAsObject();
     const character = rowToCharacter(row);
     actionRuntimeByCharacter[character.id] = parseActionRuntime(row.current_action_json);
+    characterNameByCharacterId[character.id] = `${character.firstName} ${character.lastName}`;
     snapshots.push({
       characterId: character.id,
       traits: character.currentState.traits,
@@ -1122,7 +1145,40 @@ function loadTickSnapshots(
     });
   }
   stmt.free();
-  return { snapshots, actionRuntimeByCharacter };
+  return { snapshots, actionRuntimeByCharacter, characterNameByCharacterId };
+}
+
+/**
+ * Vérifie que les charges utiles d'historique correspondent exactement aux
+ * états calculés et à l'ordre des personnages avant toute écriture SQLite.
+ */
+function assertDecisionRecordsMatchTick(
+  records: readonly DecisionRecordPayloadV1[],
+  states: ReadonlyArray<{
+    characterId: string;
+    needs: CharacterNeeds;
+    emotions: CharacterEmotions;
+    runtime: CharacterActionRuntime;
+  }>,
+): void {
+  if (records.length !== states.length) {
+    throw new Error('Nombre d’enregistrements de décision incohérent avec les états du tick.');
+  }
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    const state = states[index];
+    if (record.explanation.characterId !== state.characterId) {
+      throw new Error('Ordre des enregistrements de décision incohérent avec les états.');
+    }
+    const expectedState = {
+      needs: state.needs,
+      emotions: state.emotions,
+      runtime: state.runtime,
+    };
+    if (canonicalize(record.stateAfter) !== canonicalize(expectedState)) {
+      throw new Error(`État final de décision incohérent pour ${state.characterId}.`);
+    }
+  }
 }
 
 /** Écrit les états calculés dans la transaction courante, en ordre déterministe. */
@@ -1183,7 +1239,7 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
     const clockRow = getSimulationClockRow(db, id);
     if (!clockRow) throw new Error('Horloge de simulation introuvable pendant le tick.');
     const prev = clockRowToClock(clockRow);
-    const { snapshots, actionRuntimeByCharacter } = loadTickSnapshots(db, id);
+    const { snapshots, actionRuntimeByCharacter, characterNameByCharacterId } = loadTickSnapshots(db, id);
     const nextTick = prev.tick + 1;
     const { day, hour } = deriveDayHour(nextTick);
 
@@ -1198,6 +1254,7 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
       characters: snapshots,
       params: DEFAULT_SIMULATION_PARAMETERS,
       actionRuntimeByCharacter,
+      characterNameByCharacterId,
     });
 
     const runtimes = new Map(result.actionRuntimeStates.map((entry) => [entry.characterId, entry.runtime]));
@@ -1210,8 +1267,14 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
       return { ...state, runtime };
     });
 
+    assertDecisionRecordsMatchTick(result.decisionRecords, states);
+
     const now = new Date().toISOString();
     writeTickCharacterStates(db, states, now);
+    const inserted = insertDecisionRecords(db, result.decisionRecords, now);
+    if (inserted !== states.length) {
+      throw new Error('Écriture incomplète de l’historique des décisions.');
+    }
 
     if (tickFailureForTests) tickFailureForTests();
 
@@ -1274,4 +1337,51 @@ export async function _setWorldStatusForTests(
   stmt.run([normalizeWorldSimulationStatus(status), worldId]);
   stmt.free();
   persist(db);
+}
+
+/** Test : insère directement une charge utile d'historique. */
+export async function _insertDecisionRecordForTests(
+  payload: DecisionRecordPayloadV1,
+  createdAt = new Date().toISOString(),
+): Promise<DecisionRecordV1> {
+  const db = await getDb();
+  const record = finalizeDecisionRecord(payload, createdAt);
+  db.run('BEGIN TRANSACTION;');
+  try {
+    insertDecisionRecords(db, [payload], createdAt);
+    db.run('COMMIT;');
+    persist(db);
+    return record;
+  } catch (error) {
+    try { db.run('ROLLBACK;'); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+/** Test : lit les enregistrements décodés et validés. */
+export async function _listDecisionRecordsForTests(
+  query: DecisionHistoryReadQuery,
+): Promise<DecisionRecordV1[]> {
+  const db = await getDb();
+  return listDecisionRecords(db, query);
+}
+
+/** Test : lit un enregistrement par identifiant. */
+export async function _getDecisionRecordForTests(id: string): Promise<DecisionRecordV1> {
+  const db = await getDb();
+  return getDecisionRecord(db, id);
+}
+
+/** Test : compte les enregistrements d'un monde, avec filtre optionnel. */
+export async function _countDecisionRecordsForTests(worldId: string, characterId?: string): Promise<number> {
+  const db = await getDb();
+  return countDecisionRecords(db, worldId, characterId);
+}
+
+/** Test : lit les colonnes brutes, notamment le BLOB compressé. */
+export async function _getDecisionRecordRowsForTests(
+  worldId: string,
+): Promise<ReturnType<typeof getDecisionRecordRows>> {
+  const db = await getDb();
+  return getDecisionRecordRows(db, worldId);
 }

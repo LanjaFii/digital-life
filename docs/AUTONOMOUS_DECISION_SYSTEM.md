@@ -39,7 +39,7 @@
 | `SimulationClock` | `tick`, `day`, `hour`, `status`, `speed`, `rngState` (uint32), `lastProcessedOrder` (0). | `rngState` pourra être consommé ; `lastProcessedOrder` reste 0 tant qu'aucun ordre intra-tick n'est requis. |
 | `SeededRng` | mulberry32, `getState/setState`, `next/int/pick/chance`. | Départage éventuel, avec consommation tracée et rejouable. |
 | Worker / Manager | Worker = planification/signaux uniquement ; main = seul écrivain SQLite, verrou par monde, anti double-tick, broadcast statut. | Les services de décision restent **côté main**, purs, sans Worker ni SQLite. |
-| `TickDelta[]` | Calculés avec causes explicables, **non exposés** via IPC/UI. | Les explications de décision suivront la même politique : calculées, non massivement persistées. |
+| `TickDelta[]` | Calculés avec causes explicables, **non exposés** via IPC/UI. | Depuis 3D-A, les explications et leurs deltas sont persistés dans `decision_records` (table additive, non exposée via IPC/UI). |
 | `simulation_stopped` | `startSimulation()` refuse explicitement la reprise ; `stopSimulation()` est terminal ; recovery `running → paused` au redémarrage. | Aucun changement de comportement dans cette tranche (politique recommandée §12). |
 
 ### 1.3 Ce qui n'existe pas (à ne pas supposer)
@@ -327,10 +327,13 @@ export interface DecisionExplanation {
 ```
 
 - `DecisionExplanation` est **calculée et retournée** par le moteur, comme `TickDelta[]`.
-- [Décision] non persistée intégralement par défaut (volume) : un résumé compact
-  (`lastDecision`) est conservé dans le runtime d'action ; l'explication complète est
-  **reconstructible par rejeu** depuis le snapshot, les paramètres et `rngState`.
-- [Reporté] table dédiée aux explications si l'UI d'historique en a besoin.
+- Depuis la tranche **3D-A**, l'explication complète est persistée dans `decision_records`
+  sous forme d'un enregistrement compressé, versionné et vérifié ; le résumé compact
+  (`lastDecision`) reste conservé dans le runtime d'action. Voir
+  [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md).
+- Le paragraphe initial documentait l'état avant 3D-A : le rejeu depuis le snapshot, les
+  paramètres et `rngState` reste possible, mais n'est plus le seul moyen d'obtenir
+  l'explication complète.
 - Aucune explication n'influence le monde : c'est un artefact d'audit, pas une mémoire.
 
 ## 11. Adaptation et stabilité

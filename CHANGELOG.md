@@ -2,6 +2,35 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3D-A (historique technique des décisions)
+
+### Added
+- `src/shared/decision.ts` : `DecisionRecordPayloadV1` (charge utile déterministe produite par le tick) et `DecisionRecordV1` (métadonnées d'intégrité ajoutées par le store) ; constantes `DECISION_ENGINE_VERSION = 'phase3d.1'` et `DECISION_RECORD_VERSION = 1`.
+- `src/shared/action.ts` : `DECISION_RULES`, source runtime unique des six règles de décision.
+- `src/shared/simulation-rules.ts` : `CharacterTickResult.decisionRecords` et `CharacterTickInput.characterNameByCharacterId` (additifs, sans effet sur les règles).
+- `src/main/services/decision-record.service.ts` : canonicalisation stricte, SHA-256 sur la charge utile, compression zlib, validation exacte et vérification de toutes les colonnes de contrôle à la lecture.
+- `src/main/services/decision-history.store.ts` : table `decision_records`, table `schema_migrations` (`3D-1`), deux index, insertion transactionnelle et lecteurs internes bornés (défaut 50, max 500).
+- `src/main/services/world-store.service.ts` : écriture d'une ligne par personnage et par tick dans la transaction du tick, contrôle de cohérence avec les états, helpers de test dédiés.
+- `tests/decision-record.test.ts` (10), `tests/decision-history.test.ts` (9), `tests/decision-golden-hash.test.ts` (18) : 37 nouveaux tests.
+
+### Changed
+- `src/main/services/character-tick.service.ts` : produit `decisionRecords` indexé comme `decisions`, avec score issu de la liste réellement utilisée, `ruleIds` triés/uniques, états avant/après, urgences et avertissements préfixés.
+- `src/main/services/action-runtime.service.ts` : utilise `DECISION_RULES` au lieu de sa copie privée.
+- `tests/simulation.test.ts` : délai explicite de 30 s sur le test « 200 ticks, objectifs inchangés », avec commentaire documentant la croissance du coût de `persist()`.
+- `docs/DECISION_HISTORY_SYSTEM.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DATABASE.md`, `PROGRESS.md`, `HANDOFF.md`, `README.md` : corrections d'audit, contrat final, schéma réel, mesures de taille et décisions validées.
+
+### Fixed
+- Corrections apportées avant implémentation : aucun horodatage/hash/compression dans le calcul pur (Golden Hash préservé), `uncompressedBytes` sans référence circulaire, score provenant de `interruptionScored` pour les interruptions et `0` explicite pour poursuite/échec, `stateBefore`/`stateAfter` alignés sur les valeurs réellement persistées, pas d'inférence d'identifiants de règles depuis le texte libre, garde de suppression d'instance fondée sur `worlds.status`.
+
+### Removed
+- Copie privée des six règles de décision dans `action-runtime.service.ts` (remplacée par la constante partagée).
+
+### Technical decisions
+- Historique complet, compact et compressé : une ligne par décision, BLOB = JSON canonique du `DecisionRecordV1` complet ; `payloadSha256` porte sur la charge utile seule, `createdAt` exclu du hash et du calcul.
+- Migration additive `3D-1`, aucun backfill, aucune purge, aucun export en 3D-A. FK `world_id` en cascade, aucune FK vers `characters`.
+- Aucun IPC, preload, renderer, worker, verrou global, LLM ni changement de persistance fichier. La limitation de performance (`persist()` réexporte toute la base) est documentée ; 3D-B est recommandée avant montée en charge.
+- Validations rejouées : check-deps OK, typecheck 4 configs OK, tests **252/252** (25 fichiers), build OK. Golden Hash 18 scénarios inchangé.
+
 ## 2026-11-24 — Phase 3D (conception du moteur, documentaire, non implémentée)
 
 ### Added

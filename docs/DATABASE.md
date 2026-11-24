@@ -1,6 +1,6 @@
 # Base de données
 
-## État réel (Phase 3C)
+## État réel (Phase 3D-A)
 
 Un **fichier SQLite unique** : `data/saves/worlds.sqlite` (sql.js, WASM embarqué dans
 `resources/sqlite/`, aucun CDN). En dev : racine du projet ; en app packagée : `userData`.
@@ -84,6 +84,28 @@ Index : `idx_templates_updated_at (updated_at DESC)`.
 
 Index : `idx_simulation_clock_status (status)`.
 
+### `decision_records` (Phase 3D-A)
+
+Une ligne complète par décision, écrite dans la même transaction que l'état du tick.
+Colonnes : `id` TEXT PK (`${worldId}:${tick}:${characterId}`), `world_id` TEXT (FK →
+`worlds(id)` **ON DELETE CASCADE**), `character_id` TEXT (**aucune FK** : l'historique
+survit à la suppression d'une instance), `tick`, `day`, `hour`, `record_version`,
+`engine_version`, `registry_version`, `parameters_version`, `character_name`,
+`previous_action_id`, `selected_action_id`, `selection_rule`, `score`, `reason`,
+`rng_state_before`, `rng_state_after`, `rng_draws` (CHECK 0–1), `warnings_json`,
+`state_before_json`, `state_after_json`, `deltas_json`, `payload_blob` BLOB,
+`payload_sha256`, `uncompressed_bytes` (CHECK 0–65536), `created_at`.
+
+Index : `idx_decision_records_world_tick (world_id, tick DESC)`,
+`idx_decision_records_character_tick (world_id, character_id, tick DESC)`.
+`UNIQUE(world_id, tick, character_id)` garantit une décision par personnage et par tick.
+
+### `schema_migrations` (Phase 3D-A)
+
+`version` TEXT PK, `applied_at` TEXT NOT NULL, `description` TEXT NOT NULL. La version
+`3D-1` est inscrite après création additive de `decision_records` et des index. Aucun
+backfill : les ticks antérieurs à la migration ne sont pas reconstitués.
+
 ## Migrations additives (non destructives)
 
 À chaque ouverture (`ensureSchema`) :
@@ -97,6 +119,8 @@ Index : `idx_simulation_clock_status (status)`.
    `initial_* = current_* = *_json` existants ; `current_action_json` reçoit le runtime
    par défaut versionné.
 4. Index créés **après** migration (l'index sur `template_id` nécessite la colonne).
+5. `CREATE TABLE IF NOT EXISTS` pour `schema_migrations` et `decision_records`, puis les
+   deux index d'historique, puis insertion de `3D-1` si absente.
 
 Les anciens mondes/personnages restent consultables ; la génération aléatoire
 déterministe est inchangée. Les horloges `running` sont récupérées en `paused`
@@ -120,20 +144,24 @@ au démarrage de l'application (pas d'auto-reprise). Couvert par
   Le modèle référencé par `template_id` n'est pas modifié (pas de cascade, pas de schéma modifié) ;
   la persistance est immédiate.
 - **Tick** (`stepSimulation`) : une seule transaction écrit `current_*_json`, le runtime
-  d'action, l'horloge et `rngState`, puis un seul `persist(db)` ; rollback intégral sur
-  erreur. Les explications calculées ne sont pas encore persistées.
+  d'action, une ligne `decision_records` par personnage, l'horloge et `rngState`, puis un
+  seul `persist(db)` ; rollback intégral sur erreur, sans enregistrement orphelin.
 
-## Historique des décisions
+## Historique des décisions (implémenté en 3D-A)
 
-Les artefacts `decisions`, `actionDeltas`, `actionRuntimeStates`, `deltas` et `warnings`
-sont calculés à chaque tick mais **abandonnés** après écriture de l'état courant. La Phase
-3D propose une table additive `decision_records` avec :
+Les artefacts calculés par `computeCharacterTick()` sont enveloppés dans une charge utile
+déterministe `DecisionRecordPayloadV1`, puis complétés par le store (`payloadSha256`,
+`uncompressedBytes`, `createdAt`) et compressés dans `payload_blob`. La lecture interne
+décompresse, valide strictement la structure et vérifie hash, tailles et colonnes de
+contrôle.
 
 - `UNIQUE(world_id, tick, character_id)` : une décision par personnage et par tick ;
 - FK `world_id → worlds(id) ON DELETE CASCADE` ;
 - **aucune FK vers `characters`** : l'audit survit à la suppression d'une instance ;
-- `payload_blob` compressé, hash SHA-256, versions et bornes de taille ;
-- écriture dans la même transaction que l'état du tick.
+- `payload_blob` compressé, hash SHA-256 sur la charge utile canonique, versions et bornes
+  de taille (65 536 o canoniques, 16 384 o compressés) ;
+- écriture dans la même transaction que l'état du tick ;
+- aucun backfill, aucune purge, aucun export en 3D-A.
 
 Voir [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md) et
 [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Cet historique technique reste distinct du
@@ -141,8 +169,6 @@ journal canonique d'événements de la Phase 5.
 
 ## [Planifié, Phase 3D]
 
-- Table `decision_records` et table complémentaire `schema_migrations` (les
-  `PRAGMA table_info` existants restent la source de compatibilité legacy).
 - Persistance asynchrone `temp + fsync + SHA-256 + rename`, nettoyage du temporaire au
   démarrage, restauration de la base mémoire en cas d'échec.
 - Verrou global d'écriture ordonné après le verrou par monde.

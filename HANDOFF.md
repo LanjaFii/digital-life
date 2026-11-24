@@ -3,12 +3,13 @@
 ## Où en est le développement
 
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
-- **HEAD au démarrage de la conception 3D** : `276384eb993e91f80a309e0864a54dbe1fdf8d53`, identique à `origin/main`, arbre propre.
-- **Tranche courante** : **Phase 3D — conception documentaire terminée, non implémentée**. Six documents de conception créés et quatre documents techniques mis à jour. Phase 3C reste la dernière tranche code livrée (contrats, catalogue, sept services purs, intégration au tick et `current_action_json`). Aucun code applicatif, IPC, preload, UI, worker ni appel LLM modifié par la Phase 3D.
+- **HEAD avant implémentation 3D-A** : `e060a07a71cad43932444ae56a00de13d72a1cf0`, identique à `origin/main`, arbre propre (la conception documentaire 3D avait démarré à `276384e`).
+- **Tranche courante** : **Phase 3D-A — historique technique des décisions implémenté et validé**. 3D-B à 3D-D sont conçues mais non implémentées et nécessitent une validation explicite distincte chacune. Aucun IPC, preload, renderer, worker, verrou global ni appel LLM modifié par 3D-A.
 - **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution passive
   déterministe des 8 besoins et 10 émotions **puis** objectifs immédiats, scoring, décision,
   effets numériques et runtime persistés. Les artefacts du résultat (`decisions`,
-  `actionDeltas`, `actionRuntimeStates`, `deltas`, `warnings`) sont désormais **remplis**. Aucun
+  `actionDeltas`, `actionRuntimeStates`, `deltas`, `warnings`) sont remplis et, depuis 3D-A,
+  **une ligne complète par décision est persistée** dans `decision_records`. Aucun
   environnement, lieu, objet, ressource partagée, relation, événement, souvenir, mort ni
   dialogue n'existe.
 
@@ -100,6 +101,17 @@
 - Audit indépendant intégré : payload/hash alignés, double verrou explicite, séquence `beforeBuffer` après reprise du verrou global, recréation worker sans `simulationGetStatus()`, façade stable vérifiée, `characterName` capturé dans l'historique, orthographe corrigée.
 - Aucun fichier applicatif, schéma, migration, IPC, preload, UI, worker, donnée utilisateur ni appel LLM modifié.
 
+## Ce qui vient d'être réalisé (Phase 3D-A — implémentation)
+
+- **Contrats additifs** : `DecisionRecordPayloadV1` (produit par le tick, sans horloge/hash/compression) et `DecisionRecordV1` (complété par le store avec `payloadSha256`, `uncompressedBytes`, `createdAt`). Constantes `DECISION_ENGINE_VERSION = 'phase3d.1'`, `DECISION_RECORD_VERSION = 1` et `DECISION_RULES` exportée depuis `src/shared/action.ts` ; la copie privée de `action-runtime.service.ts` est supprimée.
+- `src/main/services/decision-record.service.ts` (nouveau) : canonicaliseur récursif strict, SHA-256 sur la charge utile, `deflateSync`/`inflateSync`, validation exacte des clés/versions/bornes/actions/règles/PRNG et comparaison de toutes les colonnes de contrôle à la lecture. Limites : 65 536 o canoniques, 16 384 o compressés, bornes structurelles indépendantes des paramètres.
+- `src/main/services/decision-history.store.ts` (nouveau) : `decision_records`, `schema_migrations` (`3D-1`), deux index, insertion dans la transaction courante, lecteurs internes bornés (défaut 50, max 500).
+- `src/main/services/character-tick.service.ts` : `CharacterTickResult.decisionRecords` indexé comme `decisions`, `stateBefore`/`stateAfter` exacts, score issu de `interruptionScored`/`scored` ou `0`, `ruleIds` union triée, avertissements préfixés, nom copié depuis `CharacterTickInput.characterNameByCharacterId`.
+- `src/main/services/world-store.service.ts` : cohérence des charges utiles avec les états avant écriture, insertion avant le hook d'erreur, rollback sans orphelin, helpers `_insert/_list/_get/_count/_getDecisionRecordRowsForTests`.
+- `docs/DECISION_HISTORY_SYSTEM.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DATABASE.md` : corrections identifiées par l'audit (pas de timestamp dans le calcul pur, pas d'inférence des identifiants de règles d'échec depuis le texte libre, `stateBefore`/`stateAfter` précis, migration sans backfill, décisions validées).
+- `tests/decision-record.test.ts` (10), `tests/decision-history.test.ts` (9), `tests/decision-golden-hash.test.ts` (18) : 37 nouveaux tests. Le test long existant de `tests/simulation.test.ts` reçoit un délai explicite de 30 s documenté (le coût de `persist()` croît avec l'historique).
+- Aucun backfill, aucune purge, aucun export, aucun canal IPC/preload/renderer/worker ajouté.
+
 ## Décisions de conception Phase 3C
 
 - **Périmètre** : conception documentaire validée ; implémentation progressive sans
@@ -129,9 +141,10 @@
   `action-scoring`, `decision-engine`, `action-execution`, tous purs, orchestrés par
   `character-tick.service.ts` existant.
 
-## Décisions de conception Phase 3D (à valider avant implémentation)
+## Décisions Phase 3D (validées ; 3D-A implémentée)
 
-- **Ordre des tranches** : 3D-A historique → 3D-B persistance/verrous → 3D-C worker de calcul → 3D-D IPC/UI. Aucune implémentation avant validation explicite.
+- **Ordre des tranches** : 3D-A historique (**livrée**) → 3D-B persistance/verrous → 3D-C worker de calcul → 3D-D IPC/UI. Chaque tranche encore à venir exige une validation explicite distincte.
+- **Décisions ouvertes résolues** (ex-§10 de `docs/PHASE_3D_DESIGN.md`) : aucune purge automatique ; aucun export/archivage en 3D-A ; timeout worker futur fixé à 30 s sans implémentation ; `engineVersion = 'phase3d.1'` avec stratégie de versionnement documentée (mineur pour changement de forme, ajout aux versions acceptées par le lecteur, aucun réécriture des anciens enregistrements).
 - **Workers** : le planificateur existant reste inchangé ; un second worker calcule tout le tick ou aucun hybride n'est accepté.
 - **SQLite** : main seul propriétaire. Historique complet compressé, `UNIQUE(world_id, tick, character_id)`, FK monde en cascade, aucune FK vers `characters`.
 - **Atomicité** : verrou global repris après le calcul, relecture de l'horloge, `beforeBuffer` avant `BEGIN`, transaction courte, `afterBuffer`, `temp + fsync + SHA-256 + rename`, restauration mémoire si une étape échoue.
@@ -183,6 +196,16 @@
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : OK.
 - Vérification documentaire : liens Markdown locaux valides, `git diff --check` OK, audit indépendant intégré, aucun secret ni fichier généré ajouté, aucun fichier applicatif modifié.
 
+## Validation réalisée (Phase 3D-A — implémentation)
+
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : OK.
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : OK (4 tsconfigs).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **252/252 OK** (25 fichiers). Ciblés : 37/37 (10 sérialisation, 9 SQLite, 18 Golden Hash).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : OK.
+- Vérifications spécifiques : migration d'une base legacy sans historique (`schema_migrations` `3D-1`, colonnes et index inspectés dans le fichier persisté), rollback sans orphelin, une ligne par personnage/tick, doublon rejeté, conservation après suppression d'instance pendant la préparation, cascade monde, réouverture, tailles BLOB à 10/50/100 personnages.
+- Golden Hash : 18 scénarios (6 profils/720 ticks, 1–50 personnages/24–720 ticks) inchangés ; chaque charge utile générée est validée strictement.
+- Aucune donnée utilisateur réelle lue ni modifiée ; aucun smoke Electron nécessaire (aucun IPC/UI modifié). Aucun secret ni fichier généré ajouté ; `git status` ne montre que les fichiers attendus.
+
 ## Problèmes / points d'attention
 
 - `simulation_stopped` reste terminal pour `start/resume` : ne pas contourner cette garde
@@ -195,13 +218,18 @@
   implémentation définitive.
 - `current_action_json` est une colonne réelle, migrée de façon additive ; une valeur
   corrompue est une erreur technique et rollback du tick, jamais une réparation silencieuse.
-- Les explications complètes ne sont toujours pas persistées : elles sont calculées puis
-  abandonnées après écriture de l'état. La table `decision_records` est **conçue** en Phase 3D,
-  pas implémentée. Aucune purge automatique n'est prévue dans la conception.
+- Les explications complètes sont persistées depuis 3D-A dans `decision_records`, avec hash
+  et colonnes de contrôle. Aucune purge automatique, aucun backfill et aucun export : les
+  ticks antérieurs à la migration restent sans historique.
 - Le verrou global d'écriture, la persistance atomique et le worker de calcul sont **conçus**
   mais absents du code : ne pas supposer qu'ils protègent déjà les ticks.
+- **Performance** : `persist()` réexporte toute la base à chaque tick ; avec l'historique, le
+  coût par tick croît avec le nombre d'enregistrements (mesuré de ~52 ms à ~157 ms pour
+  3 personnages entre les ticks 25 et 200). Le test long existant a reçu un délai de 30 s.
+  Ne pas monter en charge avant 3D-B.
 - Le nettoyage de `worldLocks` est inefficace dans le code actuel ; à corriger explicitement
-  en 3D-B sans modifier la sémantique de sérialisation.
+  en 3D-B sans modifier la sémantique de sérialisation. `WORLD_DELETE` appelle encore
+  `deleteWorld()` puis `simulationClearWorld()` séparément : également 3D-B, non corrigé ici.
 - Linux restreint (AppArmor/userns) : `--no-sandbox` dev uniquement via `scripts/dev.mjs`,
   sans modifier `src/main/security/window.ts`.
 - Ne pas lancer check-deps, typecheck, tests et build en parallèle : sous contention, le test
@@ -216,7 +244,10 @@
 - `src/shared/simulation.ts`, `src/shared/simulation-rules.ts` — contrats existants.
 - `src/main/services/character-tick.service.ts` — point d'insertion de la Phase 3C.
 - `src/main/services/world-store.service.ts` — transaction, snapshot, persistance, garde
-  `simulation_stopped`.
+  `simulation_stopped`, insertion de l'historique et helpers de test.
+- `src/main/services/decision-record.service.ts`, `decision-history.store.ts` — contrat,
+  hash/compression/validation stricte, schéma `3D-1` et lecteurs bornés.
+- `tests/decision-record.test.ts`, `tests/decision-history.test.ts`, `tests/decision-golden-hash.test.ts` — référence de non-régression et d'intégrité.
 - `src/main/services/personality-influence.service.ts` — `traitMultiplier`,
   `deficitPressure`, `quantize`, helpers réutilisables par la décision.
 - `src/main/services/needs-evolution.service.ts`, `emotion-evolution.service.ts`,
@@ -247,12 +278,11 @@ bash scripts/dev.sh
 
 ## Prochaine tâche recommandée
 
-1. **Validation explicite de la conception Phase 3D** par l'utilisateur, y compris les quatre
-   décisions ouvertes de `docs/PHASE_3D_DESIGN.md` §10 (rétention/archivage, export manuel,
-   timeout worker 30 s, `engineVersion`). Aucune implémentation ne doit commencer avant cette
-   validation.
-2. Si validée : tranche **3D-A** uniquement — `DecisionRecordV1`, `decision_records`,
-   écriture transactionnelle, validation stricte, tests de migration et rollback. Ne pas
-   toucher au worker, au verrou global ni à l'UI dans cette tranche.
-3. Après 3D-A : tranches 3D-B (persistance/verrous), 3D-C (worker + Golden Hash), puis 3D-D
-   (IPC/UI). La politique `simulation_stopped` reste inchangée ; `forkFromStopped` reste reporté.
+1. La tranche **3D-A est terminée et validée**. Ne pas la recommencer.
+2. Attendre une **validation explicite distincte** pour démarrer la tranche **3D-B** : verrou
+   global ordonné après le verrou par monde, persistance `temp + fsync + SHA-256 + rename`
+   avec restauration mémoire, suppression de monde sérialisée via le manager, nettoyage de
+   `worldLocks`. Ne pas corriger ces points « au passage » dans 3D-A.
+3. Ensuite seulement : 3D-C (worker de calcul dédié + Golden Hash) puis 3D-D (IPC de lecture
+   et inspecteur UI). La politique `simulation_stopped` reste inchangée ; `forkFromStopped`
+   reste reporté. Aucune purge, aucun export, aucun LLM.

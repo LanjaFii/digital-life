@@ -43,11 +43,12 @@ dans [WORKER_TICK_PROTOCOL.md](WORKER_TICK_PROTOCOL.md).
 ## Décisions explicables
 
 Le moteur calcule un objet `DecisionExplanation` par personnage et par tick : score des
-actions, facteurs dominants, état du PRNG, cycle, action retenue. **Ces explications ne
-sont pas encore persistées ni consultables** : la Phase 3D propose
-[DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md) et l'interface minimale
-[DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md). L'onglet Historique de la phase 7
-reste [Planifié].
+actions, facteurs dominants, état du PRNG, cycle, action retenue. Depuis la tranche **3D-A,
+ces explications sont persistées** dans `decision_records` sous forme d'enregistrements
+complets, compressés et vérifiés (voir [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md)).
+Elles ne sont **pas encore consultables depuis l'interface** : l'IPC et l'inspecteur minimal
+[DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md) relèvent de la tranche 3D-D, non
+implémentée. L'onglet Historique de la phase 7 reste [Planifié].
 
 ## Anti-boucles
 

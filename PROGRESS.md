@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3D — Consolidation du moteur, conception documentaire terminée** ; Phase 3C reste la dernière tranche implémentée, commitée et poussée.
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C documentée et validée, **tranches 1, 2 et 3 implémentées/validées** ; Phase 3D **conçue et documentée, non implémentée** (historique, verrous/persistance, worker de calcul, IPC/UI). `forkFromStopped` reste `[Reporté]`.
+- **Phase** : **Phase 3D-A — historique technique des décisions implémenté** ; Phase 3C reste la dernière tranche complète avant 3D. 3D-B à 3D-D restent à implémenter.
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A/3B/3C implémentées/validées/committées/poussées ; Phase 3D conçue et documentée, **tranche 3D-A implémentée/validée** (historique des décisions). Verrous/persistance (3D-B), worker (3D-C), IPC/UI (3D-D) non implémentés. `forkFromStopped` reste `[Reporté]`.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant conception 3D : `276384eb993e91f80a309e0864a54dbe1fdf8d53`, identique à `origin/main`, arbre propre.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant implémentation 3D-A : `e060a07a71cad43932444ae56a00de13d72a1cf0`, identique à `origin/main`, arbre propre.
 
 ## Fonctionnalités terminées
 
@@ -129,11 +129,23 @@
 - [x] Décisions ouvertes consignées dans `docs/PHASE_3D_DESIGN.md` §10 : rétention/archivage, export manuel, timeout worker 30 s et `engineVersion`.
 - [x] Aucun code applicatif, schéma SQLite, migration, IPC, preload, UI, worker, donnée utilisateur ni appel LLM modifié.
 
+## Implémentation Phase 3D-A (terminée dans cette tranche)
+
+- [x] Contrats additifs `DecisionRecordPayloadV1` / `DecisionRecordV1`, constantes `DECISION_ENGINE_VERSION = 'phase3d.1'`, `DECISION_RECORD_VERSION = 1` et `DECISION_RULES` (source runtime unique, la copie privée de `action-runtime.service.ts` est supprimée).
+- [x] `computeCharacterTick()` produit `decisionRecords` indexé comme `decisions` : score issu de la liste de candidats réellement utilisée, `ruleIds` triés/uniques, urgences, runtime avant/après, états avant/après, deltas bruts/finaux et avertissements du personnage. Aucun timestamp, hash ni compression dans la règle pure.
+- [x] Service `decision-record.service.ts` : canonicaliseur strict, SHA-256, `deflateSync`/`inflateSync`, validation exacte (structure, versions, bornes, PRNG, actions/règles) et vérification de toutes les colonnes de contrôle à la lecture.
+- [x] Store `decision-history.store.ts` : tables `decision_records` et `schema_migrations` (`3D-1`), deux index, insertion dans la transaction du tick, lecteurs internes bornés (défaut 50, max 500).
+- [x] `world-store.service.ts` : nom du personnage transmis au tick, cohérence des enregistrements avec les états, insertion avant le hook d'erreur, rollback sans orphelin, helpers de test.
+- [x] Validation stricte à l'écriture et à la lecture, sans réparation silencieuse. Aucun backfill, aucune purge, aucun export.
+- [x] Golden Hash : 18 scénarios (6 profils à 720 ticks, 1 à 50 personnages sur 24/72/168/720 ticks) byte-identiques à Phase 3C, avec validation stricte de chaque enregistrement généré.
+- [x] Aucun IPC, preload, renderer, worker, verrou global, LLM ni changement de persistance fichier.
+
 ## Fonctionnalités non commencées
 
 - [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
 - [x] ~~Phase 3C : intégration des services au tick, persistance du runtime, tests SQLite et simulations longues~~ — **terminée (tranche 3)**.
-- [ ] Phase 3D : implémentation des tranches 3D-A (historique), 3D-B (persistance/verrous), 3D-C (worker de calcul) et 3D-D (IPC/UI) — **conception terminée, en attente de validation explicite**.
+- [x] ~~Tranche 3D-A : historique technique des décisions~~ — **terminée et validée cette tranche**.
+- [ ] Phase 3D : tranches 3D-B (persistance/verrous), 3D-C (worker de calcul) et 3D-D (IPC/UI) — **conçues, en attente de validation explicite distincte pour chacune**.
 - [ ] Phase 3C complémentaire : `forkFromStopped`, hystérésis des objectifs, actions Tier B avec environnement (tous `[Reporté]`).
 - [ ] Phases 4 à 8 : relations, événements canoniques, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
@@ -233,6 +245,14 @@ Ajouts tranche conception Phase 3D (documentaire uniquement) :
 - `docs/WORLD_STORE_REFACTORING.md`
 - `docs/DECISION_INSPECTOR_UI.md`
 
+Ajouts tranche implémentation Phase 3D-A :
+- `src/main/services/decision-record.service.ts`
+- `src/main/services/decision-history.store.ts`
+- `tests/decision-record.test.ts`
+- `tests/decision-record-fixtures.ts`
+- `tests/decision-history.test.ts`
+- `tests/decision-golden-hash.test.ts`
+
 Ajouts tranche implémentation Phase 3C — tranche 2 :
 - `src/main/services/goal-selection.service.ts`
 - `src/main/services/action-candidacy.service.ts`
@@ -266,6 +286,7 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - Tranche implémentation Phase 3C — tranche 2 : `src/shared/decision.ts`, `src/shared/simulation-rules.ts`, `docs/AUTONOMOUS_DECISION_SYSTEM.md` (calibration, services, état), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`. Aucun appel à ces services depuis le tick.
 - Tranche implémentation Phase 3C — tranche 3 : `src/main/services/character-tick.service.ts`, `src/main/services/decision-engine.service.ts`, `src/main/services/world-store.service.ts`, `tests/simulation.test.ts`, `tests/simulation-long.test.ts`, `tests/character-tick.test.ts`, `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
 - Tranche conception Phase 3D (documentaire) : `docs/DATABASE.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/EVENT_AND_MEMORY_SYSTEM.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`. Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI ni appel LLM modifié.
+- Tranche implémentation Phase 3D-A : `src/shared/action.ts`, `src/shared/decision.ts`, `src/shared/simulation-rules.ts`, `src/main/services/action-runtime.service.ts`, `src/main/services/character-tick.service.ts`, `src/main/services/world-store.service.ts`, `tests/simulation.test.ts` (timeout documenté du test long), `docs/DECISION_HISTORY_SYSTEM.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DATABASE.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
 
 ## Tests réussis
 
@@ -281,6 +302,7 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - **Validation tranche implémentation Phase 3C — tranche 2** : check-deps OK, typecheck 4 configs OK, tests **209/209 passés** (22 fichiers, dont 51 tests des services purs), build OK. Audit Git avant tranche : HEAD local = `origin/main` = `033fced`, arbre propre. Aucun appel des services depuis le tick : comportement Phase 3B inchangé.
 - **Validation tranche implémentation Phase 3C — tranche 3** : check-deps OK (via build), typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK. Scénarios SQLite : runtime persistant, rejeu après réouverture, rollback intégral sur runtime corrompu, deux personnages, `current_goals_json` inchangé. Longs : 24/72/168/720/3000 ticks + 6 profils, anti-boucle et bornes vérifiés.
 - **Validation tranche conception Phase 3D (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK. Vérification croisée : 6 nouveaux documents, 4 documents techniques mis à jour, audit indépendant intégré, liens Markdown locaux valides, `git diff --check` OK, aucun fichier applicatif modifié.
+- **Validation tranche implémentation Phase 3D-A** : check-deps OK, typecheck 4 configs OK, tests **252/252 passés** (25 fichiers : 215 existants + 37 nouveaux), build OK. Tests ciblés 37/37 (10 sérialisation, 9 SQLite, 18 Golden Hash). Vérification migration legacy (`schema_migrations` `3D-1`, colonnes et index présents dans le fichier persisté), rollback sans orphelin, conservation après suppression d'instance, cascade monde, doublons rejetés, tailles BLOB mesurées à 10/50/100 personnages. Golden Hash 18 scénarios inchangé. Aucun secret ni fichier généré ajouté, aucun canal IPC/preload/renderer/worker modifié.
 
 ## Tests échoués
 
@@ -303,4 +325,4 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 
 ## Prochaine tâche précise
 
-Attendre la validation explicite de la conception Phase 3D. Si elle est validée, commencer par la tranche **3D-A** : contrat `DecisionRecordV1`, table additive `decision_records`, écriture dans la transaction du tick, validation stricte et tests de rollback/migration ; ne pas toucher au worker, aux verrous ni à l'UI dans cette tranche. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.
+La tranche **3D-A est terminée**. Attendre une validation explicite **distincte** avant de démarrer la tranche **3D-B** (verrou global d'écriture ordonné après le verrou par monde, persistance `temp + fsync + SHA-256 + rename` avec restauration mémoire, suppression de monde sérialisée). Ne pas toucher au worker (3D-C) ni à l'IPC/UI (3D-D) sans validation dédiée. La limitation de performance documentée (`persist()` réexporte toute la base, coût croissant avec l'historique) rend 3D-B recommandée avant toute montée en charge. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.

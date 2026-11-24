@@ -1,10 +1,15 @@
-# Historique technique des décisions — [Planifié, Phase 3D]
+# Historique technique des décisions — Phase 3D-A
 
-> Aucune table, aucun service, aucun IPC et aucune UI ne sont implémentés par cette tranche
-> documentaire. Le moteur Phase 3C calcule `DecisionExplanation` à chaque tick, mais
-> `stepSimulation()` ne persiste aujourd'hui que besoins/émotions (miroirs legacy et `current_*`),
+> Le moteur Phase 3C calcule `DecisionExplanation` à chaque tick, mais avant 3D-A
+> `stepSimulation()` ne persistait que besoins/émotions (miroirs legacy et `current_*`),
 > le runtime (`current_action_json`), l'horloge/`rngState`, `updated_at` et `worlds.status`.
-> Il n'écrit ni traits, ni `current_goals_json`, ni `decisions`/`actionDeltas`/`warnings`.
+> Il n'écrivait ni traits, ni `current_goals_json`, ni `decisions`/`actionDeltas`/`warnings`.
+> La tranche 3D-A ajoute uniquement l'historique technique : aucun IPC, preload, UI,
+> worker, verrou global ni changement de persistance fichier n'est concerné.
+>
+> **Statut : tranche 3D-A implémentée et validée.** Le calcul Phase 3C reste
+> byte-identique à entrées égales (Golden Hash). 252 tests passent, typecheck des
+> quatre configurations et build réussis. Les tranches 3D-B à 3D-D restent à faire.
 
 ## 1. Deux notions distinctes
 
@@ -22,7 +27,7 @@ L'historique 3D n'est **pas** le journal de la Phase 5 :
 
 Il est consulté pour expliquer, auditer et rejouer. Le futur événement Phase 5 pourra référencer une décision par `sourceDecisionId`, mais l'inverse n'est pas prévu : une décision reste un artefact technique, pas un fait narratif.
 
-## 2. Ce qui manque aujourd'hui
+## 2. Lacunes identifiées avant 3D-A (comblées)
 
 `DecisionExplanation` contient déjà : `worldId`, `characterId`, `tick`, `day`, `hour`, `ruleId`, `motivations`, `immediateGoals`, `candidateScores`, `selectedActionId`, `selectionRule`, `reason`, `rejected`, `expectedEffects`, `rngStateBefore`, `rngStateAfter`, `rngDraws`.
 
@@ -40,16 +45,16 @@ La solution retenue est un contrat additif `DecisionRecordV1` qui **enveloppe** 
 ## 3. Contrat `DecisionRecordV1`
 
 ```ts
-interface DecisionRecordV1 {
+interface DecisionRecordPayloadV1 {
   id: string;                      // `${worldId}:${tick}:${characterId}`
   recordVersion: 1;
-  engineVersion: string;           // ex. "phase3d.1"
+  engineVersion: string;           // "phase3d.1"
   registryVersion: number;         // ACTION_REGISTRY.version
   parametersVersion: number;       // SimulationParametersV1.version
-  ruleIds: readonly string[];      // decision.v1, goal.immediate.v1, causes de deltas
+  ruleIds: readonly string[];      // union triée et unique des identifiants de règles
 
   explanation: DecisionExplanation;
-  score: number;                   // score du candidat retenu
+  score: number;                   // score réellement utilisé, 0 si aucune évaluation
 
   needUrgencies: Readonly<Record<NeedKey, number>>;
   emotionUrgencies: Readonly<Record<EmotionKey, number>>;
@@ -81,17 +86,49 @@ interface DecisionRecordV1 {
   actionDeltas: readonly ActionEffectDelta[];
   appliedDeltas: readonly TickDelta[];
   warnings: readonly string[];
+}
 
-  // Métadonnées d'intégrité, exclues du hash mais conservées dans le BLOB.
+interface DecisionRecordV1 extends DecisionRecordPayloadV1 {
+  // Métadonnées ajoutées par le store, exclues du hash et du calcul.
   payloadSha256: string;
   uncompressedBytes: number;
   createdAt: string;
 }
 ```
 
-`DecisionRecordPayloadV1` désigne le même objet **sans** `payloadSha256`, `uncompressedBytes` ni `createdAt`. `canonicalDecisionPayload(record)` produit son JSON canonique ; `payloadSha256` est le SHA-256 de ce JSON. Le BLOB contient le JSON canonique du `DecisionRecordV1` **complet**, compressé avec zlib : les champs d'intégrité et `createdAt` sont donc reconstruisibles sans perte. `uncompressedBytes` mesure la taille du JSON complet avant compression.
+Corrections apportées avant l'implémentation, afin de préserver le déterminisme Phase 3C :
 
-`CharacterTickResult` gagne un tableau additif `decisionRecords: DecisionRecordV1[]`. Le tableau `decisions` existant reste produit pour la compatibilité des tests ; les deux ne doivent jamais diverger.
+- `computeCharacterTick()` produit uniquement `DecisionRecordPayloadV1` dans son tableau
+  additif `decisionRecords`, indexé comme `decisions`, `characterStates` et
+  `actionRuntimeStates`. Aucune horloge, compression ou hash n'est calculé dans la règle pure.
+- Le store ajoute `payloadSha256`, `uncompressedBytes` et `createdAt` pour former le
+  `DecisionRecordV1` complet au moment de l'insertion.
+- `createdAt` est une métadonnée de diagnostic produite par le main avec
+  `new Date().toISOString()`. Il n'est jamais lu par une règle métier, jamais inclus dans
+  le Golden Hash, jamais inclus dans `payloadSha256` ni dans `uncompressedBytes`.
+- `payloadSha256` est le SHA-256 de `canonicalDecisionPayload(payload)`, où le canonicaliseur
+  trie récursivement les clés et refuse `undefined`, `NaN` et l'infini.
+- `uncompressedBytes` est la taille en octets UTF-8 de ce même JSON canonique de la charge
+  utile. Cette définition évite une référence circulaire et rend la valeur indépendante de
+  l'horloge.
+- Le BLOB est `deflateSync(Buffer.from(canonicalDecisionRecord(record), 'utf8'))` : il contient
+  le JSON canonique du `DecisionRecordV1` **complet**, y compris les métadonnées. À la lecture,
+  le main décompresse, valide la structure, extrait la charge utile, recalcule le hash et
+  vérifie l'égalité des métadonnées avec les colonnes.
+- `score` est repris de la liste de candidats **réellement utilisée** par la décision :
+  `interruptionScored` pour `interruption`, `scored` sinon lorsque le candidat sélectionné y
+  figure. Les règles `continue_active` et `action_failed` ne réévaluent aucun score : la valeur
+  est explicitement `0`. Aucun champ existant de `DecisionExplanation` n'est modifié pour
+  conserver les résultats Phase 3C byte-identiques.
+- `ruleIds` est l'union triée et unique de `decision.v1`, `goal.immediate.v1`, des `ruleId`
+  des deltas et des `ruleId` des effets d'action. Les identifiants de règles d'échec présents
+  uniquement dans le texte libre `reason` ne sont pas inférés.
+- `characterName` est fourni au tick par `CharacterTickInput.characterNameByCharacterId`,
+  sans influence sur les règles. À défaut, l'identifiant du personnage est utilisé.
+
+`CharacterTickResult` gagne un tableau additif `decisionRecords: DecisionRecordPayloadV1[]`.
+Le tableau `decisions` existant reste produit pour la compatibilité des tests ; les deux ne
+doivent jamais diverger, y compris dans l'ordre lexicographique des identifiants.
 
 ### 3.1 Lien décision → deltas → état
 
@@ -99,14 +136,32 @@ Le lien est l'identifiant naturel `{world_id, tick, character_id}` :
 
 - `explanation.selectedActionId` donne l'action retenue ;
 - `actionDeltas` porte `expected` et `applied` par champ, avec le même `actionId` et le même `tick` ;
-- `appliedDeltas` explique l'état final aux centièmes ;
-- `stateAfter` doit être égal à `current_needs_json`, `current_emotions_json` et `current_action_json` uniquement. Le tick n'écrit ni `current_traits_json` ni `current_goals_json`.
+- `passiveDeltas` sont les deltas projetés bruts, avant effets d'action. Ils diffèrent des
+  `passiveNeedDeltas` utilisés par le scoring, qui sont un `Record<NeedKey, number>` distinct ;
+- `appliedDeltas` sont les deltas finaux du tick, dont `before` est l'état de début de tick
+  et `after` l'état final aux centièmes ;
+- `stateBefore` est le snapshot de début de tick (`snapshot.needs`, `snapshot.emotions`) et le
+  runtime parsé avant décision ;
+- `stateAfter` est exactement la paire écrite dans `characterStates[i]` et
+  `actionRuntimeStates[i]`, donc égale à `current_needs_json`, `current_emotions_json` et
+  `current_action_json`. Le tick n'écrit ni `current_traits_json` ni `current_goals_json` ;
+- `warnings` contient les avertissements du personnage, extraits du tableau global par
+  préfixe `${characterId}:`.
+
+L'index `i` est le même pour `decisionRecords`, `decisions`, `characterStates` et
+`actionRuntimeStates`, dans l'ordre lexicographique de `orderSnapshots()`.
 
 Toute incohérence est une erreur technique, pas une correction automatique.
 
-## 4. Modèle SQLite proposé
+## 4. Modèle SQLite
 
 ```sql
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL,
+  description TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS decision_records (
   id TEXT PRIMARY KEY,                    -- `${worldId}:${tick}:${characterId}`
   world_id TEXT NOT NULL,
@@ -138,7 +193,7 @@ CREATE TABLE IF NOT EXISTS decision_records (
 
   payload_blob BLOB NOT NULL,
   payload_sha256 TEXT NOT NULL,
-  uncompressed_bytes INTEGER NOT NULL,
+  uncompressed_bytes INTEGER NOT NULL CHECK (uncompressed_bytes BETWEEN 0 AND 65536),
 
   created_at TEXT NOT NULL,
 
@@ -155,13 +210,14 @@ CREATE INDEX IF NOT EXISTS idx_decision_records_character_tick
 ### 4.1 Contraintes et choix
 
 - `id` est déterministe, sans UUID : il ne dépend d'aucun aléa extérieur à la simulation.
-- `character_id` n'a **pas** de clé étrangère : l'historique doit survivre à la suppression d'une instance. Dans l'état actuel, cette suppression est de toute façon interdite hors `preparation`, donc aucun historique n'existe encore à ce moment ; l'absence de FK reste une garantie d'audit.
+- `character_id` n'a **pas** de clé étrangère : l'historique doit survivre à la suppression d'une instance. La garde actuelle vérifie uniquement `worlds.status === 'preparation'`, pas l'existence d'un historique. Le test de conservation insère donc directement une ligne pendant la préparation, puis supprime l'instance. L'absence de FK reste une garantie d'audit.
 - `world_id` a une cascade : supprimer un monde supprime tout son historique.
 - `UNIQUE(world_id, tick, character_id)` garantit exactement une décision par personnage et par tick.
 - `character_name` est une copie du nom au moment de l'écriture : l'UI n'a pas besoin de joindre `characters`, et l'historique reste lisible après suppression d'une instance.
-- `created_at` est une métadonnée de diagnostic produite par le main avec `new Date().toISOString()` ; aucune règle métier ne la lit.
-- `payload_blob` est le JSON canonique complet du `DecisionRecordV1`, compressé avec `zlib.deflateSync` côté main. La compression n'affecte pas le déterminisme de la simulation ; `payload_sha256` porte sur `canonicalDecisionPayload(record)` avant compression. Un BLOB compressé valide doit redonner, après décompression, exactement les champs `payloadSha256`, `uncompressedBytes` et `createdAt` des colonnes.
-- Les colonnes `state_before_json`, `state_after_json` et `deltas_json` sont des copies de contrôle ; `deltas_json` contient `passiveDeltas`, `actionDeltas` et `appliedDeltas`. Elles permettent de détecter une divergence sans décompresser le BLOB, mais ne remplacent jamais le BLOB comme source de vérité.
+- `created_at` est une métadonnée de diagnostic produite par le store avec `new Date().toISOString()` ; aucune règle métier ne la lit et elle n'entre dans aucun hash.
+- `payload_blob` est le JSON canonique complet du `DecisionRecordV1`, compressé avec `zlib.deflateSync` côté main. La compression n'affecte pas le déterminisme de la simulation ; `payload_sha256` porte sur `canonicalDecisionPayload(payload)` avant compression. Un BLOB compressé valide doit redonner, après décompression, exactement les champs `payloadSha256`, `uncompressedBytes` et `createdAt` des colonnes.
+- `uncompressed_bytes` porte sur la charge utile canonique seule, sans métadonnées : la valeur est calculable dans le tick pur et indépendante de `createdAt`.
+- Les colonnes `state_before_json`, `state_after_json`, `deltas_json` et `warnings_json` sont des copies de contrôle canoniques ; `deltas_json` contient `passiveDeltas`, `actionDeltas` et `appliedDeltas`. Elles permettent de détecter une divergence sans décompresser le BLOB, mais ne remplacent jamais le BLOB comme source de vérité.
 
 ## 5. Validation stricte
 
@@ -169,13 +225,13 @@ La validation est divisée en deux niveaux distincts.
 
 **À l'écriture et à la lecture** :
 
-1. `id === \`${explanation.worldId}:${explanation.tick}:${explanation.characterId}\`` et `recordVersion === 1`, versions de registre/paramètres connues ;
-2. SHA-256 de `canonicalDecisionPayload(record)` égal à `payload_sha256` ;
-3. `uncompressed_bytes <= 65536` et taille BLOB `<= 16384` ;
-4. `selected_action_id` appartient à `ACTION_IDS` ;
-5. `selection_rule` appartient à la constante runtime `DECISION_RULES` (six valeurs : `score_tiebreak_rng`, `score_tiebreak_id`, `forced_idle`, `continue_active`, `interruption`, `action_failed`) ;
+1. structure exacte, sans clé inconnue ni valeur `undefined` ; `id === \`${explanation.worldId}:${explanation.tick}:${explanation.characterId}\``, `recordVersion === 1`, `engineVersion === 'phase3d.1'`, versions de registre/paramètres connues ;
+2. SHA-256 de `canonicalDecisionPayload(payload)` égal à `payload_sha256` ; `canonicalDecisionRecord(record)` redonne exactement le JSON décompressé et `uncompressed_bytes` égal à la longueur UTF-8 du JSON canonique de la charge utile ;
+3. `uncompressed_bytes <= 65536` et taille BLOB `<= 16384` ; bornes structurelles indépendantes des paramètres : au plus 19 motivations, 3 objectifs immédiats, 11 candidats, 64 identifiants d'action récents, 128 deltas et 64 avertissements ;
+4. `selected_action_id` appartient à `ACTION_IDS` ; `score` est fini dans `[-5, 5]`, avec la convention explicite `0` pour `continue_active`/`action_failed` ;
+5. `selection_rule` appartient à la constante runtime `DECISION_RULES` exportée par `src/shared/action.ts` (six valeurs : `score_tiebreak_rng`, `score_tiebreak_id`, `forced_idle`, `continue_active`, `interruption`, `action_failed`) ; la copie privée de `action-runtime.service.ts` est supprimée au profit de cette constante ;
 6. `rng_draws` vaut 0 ou 1, `rng_state_*` sont des uint32 ;
-7. toutes les valeurs `needs`/`emotions` sont finies et dans `[0, 100]`.
+7. toutes les valeurs `needs`/`emotions` sont finies et dans `[0, 100]`, toutes les urgences et tous les scores sont finis et dans `[0, 1]` ou `[-5, 5]` selon leur nature.
 
 **À l'écriture uniquement**, lorsque le snapshot du tick est encore disponible :
 
@@ -194,16 +250,26 @@ Dans la tranche 3D-A :
 1. `CREATE TABLE IF NOT EXISTS decision_records` et les deux index ;
 2. `CREATE TABLE IF NOT EXISTS schema_migrations` avec `version`, `applied_at`, `description` ;
 3. insertion de la version `3D-1` après succès des étapes précédentes ;
-4. aucun backfill : les parties historiques ne sont pas reconstituées par inférence ;
+4. aucun backfill de `decision_records` : les décisions passées ne sont pas reconstituées par inférence. Le backfill existant des colonnes de personnages reste inchangé ;
 5. les anciens `PRAGMA table_info` et `ALTER TABLE ADD COLUMN` restent actifs.
 
 Les bases Phase 1/3A/3B/3C restent lisibles. Le premier tick après migration crée les premières lignes.
 
-## 7. Rétention et croissance
+## 7. Rétention, croissance et mesures
 
-Aucune purge automatique en 3D. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md) §7 pour les estimations à 10, 50 et 100 personnages à 1x et 10x.
+Aucune purge automatique en 3D. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md) §7 pour les estimations et la décision produit validée (aucun export/archivage en 3D-A).
 
-L'UI applique une fenêtre d'affichage de 500 entrées maximum. Ce n'est pas une limite de stockage. Une politique de purge ou d'archivage nécessitera une décision produit séparée.
+Mesures réelles effectuées après un tick avec la génération aléatoire par défaut (un enregistrement par personnage) :
+
+| Personnages | Enregistrements | BLOB total | BLOB moyen | BLOB min/max | Charge utile canonique moyenne |
+|---|---|---|---|---|---|
+| 10 | 10 | 47 592 o | 4 759,2 o | 4 641 / 4 931 o | 42 231,7 o |
+| 50 | 50 | 237 752 o | 4 755,0 o | 4 386 / 5 069 o | 41 872,8 o |
+| 100 | 100 | 404 895 o | 4 048,9 o | 3 381 / 5 136 o | 38 086,8 o |
+
+**Limitation connue** : `persist()` réexporte l'intégralité de `worlds.sqlite` à chaque tick. Le coût d'un tick croît donc avec le nombre d'enregistrements déjà stockés (mesuré de ~52 ms à ~157 ms pour 3 personnages entre le tick 25 et le tick 200). Aucune optimisation de persistance n'est introduite en 3D-A : le verrou global (3D-B), le déplacement du calcul (3D-C) et la lecture IPC (3D-D) restent des tranches distinctes. Pour une simulation longue ou un grand nombre de personnages, la tranche 3D-B doit être livrée avant toute montée en charge.
+
+Les helpers de lecture internes sont bornés à 500 entrées (défaut 50). La future UI appliquera elle aussi une fenêtre de 500 entrées maximum : ce n'est pas une limite de stockage.
 
 ## 8. IPC proposé
 
@@ -243,9 +309,9 @@ décrits dans [DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md).
 
 Aucune écriture, aucune suppression et aucun déclenchement de tick via ces canaux. Le renderer ne voit jamais de BLOB brut : le main décompresse et valide avant de renvoyer un objet typé.
 
-## 9. Tests prévus
+## 9. Tests
 
-**Unitaires**
+**Unitaires (10 tests, `tests/decision-record.test.ts`)**
 
 - sérialisation/désérialisation `DecisionRecordV1`, sans perte des champs d'intégrité ;
 - hash canonique stable, avec `DECISION_RULES` comme source runtime des six règles ;
@@ -253,7 +319,7 @@ Aucune écriture, aucune suppression et aucun déclenchement de tick via ces can
 - compression/décompression sans perte ;
 - limitation `limit` de la query, valeur par défaut 50 et maximum 500.
 
-**Intégration SQLite**
+**Intégration SQLite (9 tests, `tests/decision-history.test.ts`)**
 
 - une ligne par personnage et par tick sur 1 et 2 personnages ;
 - écriture dans la même transaction que l'état et l'horloge ;
@@ -261,12 +327,13 @@ Aucune écriture, aucune suppression et aucun déclenchement de tick via ces can
 - réouverture : enregistrement lisible et hash valide ;
 - ancienne base sans table : migration additive réussie ;
 - suppression d'un monde : cascade de l'historique ;
-- suppression d'une instance : historique conservé, avec insertion directe préalable via un helper de test `_insertDecisionRecordForTests()` car la garde `assertWorldPreparation` interdit cette suppression dès qu'un historique simulateur existe ;
+- suppression d'une instance : historique conservé, avec insertion directe préalable via `_insertDecisionRecordForTests()` pendant la préparation ; la garde `assertWorldPreparation` vérifie uniquement `worlds.status`, pas l'historique ;
 - mesure de taille sur simulation longue.
 
-**Golden Hash**
+**Golden Hash (18 scénarios, `tests/decision-golden-hash.test.ts`)**
 
-- mêmes seed/entrées/règles => même JSON canonique, avant et après passage au worker.
+- mêmes seed/entrées/règles => même JSON canonique du calcul Phase 3C, avant et après 3D-A et avant le futur passage au worker ;
+- chaque enregistrement produit sur ces simulations longues (jusqu'à 720 ticks) est soumis à la validation stricte.
 
 ## 10. Hors périmètre
 

@@ -22,7 +22,13 @@ import {
   type EmotionKey,
   type NeedKey,
 } from '../../shared/character';
-import type { DecisionExplanation } from '../../shared/decision';
+import {
+  DECISION_ENGINE_VERSION,
+  type DecisionExplanation,
+  type GoalSelectionResult,
+  type DecisionRecordPayloadV1,
+  type ScoredCandidate,
+} from '../../shared/decision';
 import type {
   AutonomousDecisionSnapshot,
   CharacterTickInput,
@@ -34,7 +40,7 @@ import type {
 } from '../../shared/simulation-rules';
 import { assertActionExecutable, executeActionEffects } from './action-execution.service';
 import { buildActionCandidates } from './action-candidacy.service';
-import { getActionDefinition } from './action-registry.service';
+import { ACTION_REGISTRY, getActionDefinition } from './action-registry.service';
 import {
   clearActiveActionRuntime,
   continueActionRuntime,
@@ -42,6 +48,7 @@ import {
   startActionRuntime,
 } from './action-runtime.service';
 import { scoreActionCandidates } from './action-scoring.service';
+import { collectRuleIds } from './decision-record.service';
 import { decideAction } from './decision-engine.service';
 import { selectImmediateGoals } from './goal-selection.service';
 import { finalizeValue } from './personality-influence.service';
@@ -265,6 +272,106 @@ function applyDecision(
   return outcome;
 }
 
+/**
+ * Score associé à la décision finale. Les interruptions sont évaluées depuis
+ * `interruptionScored` ; poursuite et échec ne réévaluent aucun candidat et
+ * portent explicitement `0`.
+ */
+function resolveSelectedScore(
+  decision: DecisionExplanation,
+  scored: readonly ScoredCandidate[],
+  interruptionScored: readonly ScoredCandidate[],
+): number {
+  if (decision.selectionRule === 'continue_active' || decision.selectionRule === 'action_failed') return 0;
+  const pool = decision.selectionRule === 'interruption' ? interruptionScored : scored;
+  const candidate = pool.find((item) => item.actionId === decision.selectedActionId);
+  if (!candidate) throw new Error(`Score du candidat retenu introuvable pour ${decision.selectedActionId}.`);
+  return candidate.score;
+}
+
+function resolvePreviousAction(runtime: CharacterActionRuntime): DecisionRecordPayloadV1['previousAction'] {
+  const active = runtime.active;
+  const last = runtime.lastDecision;
+  if (active) {
+    return {
+      actionId: active.actionId,
+      rule: last?.tick === active.startedTick && last.actionId === active.actionId ? last.rule : null,
+      tick: active.startedTick,
+      active: true,
+    };
+  }
+  return {
+    actionId: last?.actionId ?? null,
+    rule: last?.rule ?? null,
+    tick: last?.tick ?? null,
+    active: false,
+  };
+}
+
+/** Extrait les avertissements d'un personnage du tableau global préfixé. */
+function characterWarnings(warnings: readonly string[], characterId: string): string[] {
+  const prefix = `${characterId}:`;
+  return warnings.filter((warning) => warning.startsWith(prefix));
+}
+
+interface BuildRecordInput {
+  snapshot: CharacterTickSnapshot;
+  decision: DecisionExplanation;
+  scored: readonly ScoredCandidate[];
+  interruptionScored: readonly ScoredCandidate[];
+  runtimeBefore: CharacterActionRuntime;
+  runtimeAfter: CharacterActionRuntime;
+  goals: GoalSelectionResult;
+  paramsVersion: number;
+  passiveDeltas: readonly TickDelta[];
+  actionDeltas: readonly ActionEffectDelta[];
+  appliedDeltas: readonly TickDelta[];
+  warnings: readonly string[];
+  finalized: { needs: CharacterNeeds; emotions: CharacterEmotions };
+  characterName: string;
+}
+
+function buildDecisionRecordPayload(input: BuildRecordInput): DecisionRecordPayloadV1 {
+  const { decision, snapshot } = input;
+  const passiveDeltas = input.passiveDeltas.map((delta) => ({ ...delta, causes: delta.causes.map((cause) => ({ ...cause })) }));
+  const actionDeltas = input.actionDeltas.map((delta) => ({ ...delta }));
+  const appliedDeltas = input.appliedDeltas.map((delta) => ({ ...delta, causes: delta.causes.map((cause) => ({ ...cause })) }));
+  return {
+    id: `${decision.worldId}:${decision.tick}:${decision.characterId}`,
+    recordVersion: 1,
+    engineVersion: DECISION_ENGINE_VERSION,
+    registryVersion: ACTION_REGISTRY.version,
+    parametersVersion: input.paramsVersion,
+    ruleIds: collectRuleIds({
+      explanation: decision,
+      passiveDeltas,
+      actionDeltas,
+      appliedDeltas,
+    }),
+    explanation: decision,
+    score: resolveSelectedScore(decision, input.scored, input.interruptionScored),
+    needUrgencies: { ...input.goals.needUrgencies },
+    emotionUrgencies: { ...input.goals.emotionUrgencies },
+    previousAction: resolvePreviousAction(input.runtimeBefore),
+    newAction: { actionId: decision.selectedActionId, rule: decision.selectionRule },
+    characterName: input.characterName,
+    stateBefore: {
+      needs: { ...snapshot.needs },
+      emotions: { ...snapshot.emotions },
+      runtime: input.runtimeBefore,
+    },
+    stateAfter: {
+      needs: { ...input.finalized.needs },
+      emotions: { ...input.finalized.emotions },
+      runtime: input.runtimeAfter,
+    },
+    passiveDeltas,
+    actionDeltas,
+    appliedDeltas,
+    warnings: characterWarnings(input.warnings, snapshot.characterId),
+  };
+}
+
 /** Calcule le tick complet de tous les personnages. Résultat purement mémoire. */
 export function computeCharacterTick(input: CharacterTickInput): CharacterTickResult {
   const ordered = orderSnapshots(input.characters);
@@ -277,6 +384,7 @@ export function computeCharacterTick(input: CharacterTickInput): CharacterTickRe
   const deltas: TickDelta[] = [];
   const warnings: string[] = [];
   const decisions: DecisionExplanation[] = [];
+  const decisionRecords: DecisionRecordPayloadV1[] = [];
   const actionDeltas: ActionEffectDelta[] = [];
   const actionRuntimeStates: CharacterTickResult['actionRuntimeStates'] = [];
 
@@ -368,6 +476,22 @@ export function computeCharacterTick(input: CharacterTickInput): CharacterTickRe
     deltas.push(...finalized.deltas);
     warnings.push(...finalized.warnings);
     decisions.push(decision.explanation);
+    decisionRecords.push(buildDecisionRecordPayload({
+      snapshot,
+      decision: decision.explanation,
+      scored,
+      interruptionScored,
+      runtimeBefore: runtime,
+      runtimeAfter: outcome.runtime,
+      goals,
+      paramsVersion: input.params.version,
+      finalized,
+      passiveDeltas: [...projectedNeeds.deltas, ...projectedEmotions.deltas],
+      actionDeltas: outcome.effects,
+      appliedDeltas: finalized.deltas,
+      warnings: finalized.warnings,
+      characterName: input.characterNameByCharacterId?.[snapshot.characterId] ?? snapshot.characterId,
+    }));
     actionDeltas.push(...outcome.effects);
     actionRuntimeStates.push({ characterId: snapshot.characterId, runtime: outcome.runtime });
   }
@@ -379,6 +503,7 @@ export function computeCharacterTick(input: CharacterTickInput): CharacterTickRe
     characterStates,
     deltas,
     decisions,
+    decisionRecords,
     actionDeltas,
     actionRuntimeStates,
     warnings,

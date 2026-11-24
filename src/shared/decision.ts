@@ -5,9 +5,24 @@
  * objectif immédiat n'est écrit dans `current_goals_json` et aucun texte libre
  * (`CharacterGoal.label`) n'est interprété.
  */
-import type { ActionEffects, ActionId, DecisionRule } from './action';
+import type {
+  ActionEffectDelta,
+  ActionEffects,
+  ActionId,
+  CharacterActionRuntime,
+  DecisionRule,
+} from './action';
 import type { CharacterEmotions, CharacterNeeds, EmotionKey, NeedKey } from './character';
-import type { AutonomousDecisionSnapshot, DecisionParameters, SimulationParametersV1 } from './simulation-rules';
+import type {
+  AutonomousDecisionSnapshot,
+  DecisionParameters,
+  SimulationParametersV1,
+  TickDelta,
+} from './simulation-rules';
+
+/** Version initiale du moteur pour l'historique technique (Phase 3D-A). */
+export const DECISION_ENGINE_VERSION = 'phase3d.1';
+export const DECISION_RECORD_VERSION = 1;
 
 export type MotivationSource = 'need' | 'emotion' | 'circadian';
 
@@ -129,4 +144,63 @@ export interface DecisionEngineInput {
   params: DecisionParameters;
   /** Un seul appel à next() au plus, uniquement en cas d'ex æquo réel. */
   rng: DecisionRng;
+}
+
+/**
+ * Charge utile déterministe d'une décision (Phase 3D-A).
+ *
+ * Ce type est produit par `computeCharacterTick()` : il ne contient ni horloge,
+ * ni hash, ni compression. Le store ajoute les métadonnées d'intégrité pour
+ * former `DecisionRecordV1`.
+ */
+export interface DecisionRecordPayloadV1 {
+  id: string;
+  recordVersion: typeof DECISION_RECORD_VERSION;
+  engineVersion: typeof DECISION_ENGINE_VERSION;
+  registryVersion: number;
+  parametersVersion: number;
+  ruleIds: readonly string[];
+
+  explanation: DecisionExplanation;
+  score: number;
+
+  needUrgencies: Readonly<Record<NeedKey, number>>;
+  emotionUrgencies: Readonly<Record<EmotionKey, number>>;
+
+  previousAction: {
+    actionId: ActionId | null;
+    rule: DecisionRule | null;
+    tick: number | null;
+    active: boolean;
+  };
+  newAction: {
+    actionId: ActionId;
+    rule: DecisionRule;
+  };
+
+  characterName: string;
+  stateBefore: {
+    needs: CharacterNeeds;
+    emotions: CharacterEmotions;
+    runtime: CharacterActionRuntime;
+  };
+  stateAfter: {
+    needs: CharacterNeeds;
+    emotions: CharacterEmotions;
+    runtime: CharacterActionRuntime;
+  };
+
+  passiveDeltas: readonly TickDelta[];
+  actionDeltas: readonly ActionEffectDelta[];
+  appliedDeltas: readonly TickDelta[];
+  warnings: readonly string[];
+}
+
+/** Enregistrement complet, avec métadonnées ajoutées par le store. */
+export interface DecisionRecordV1 extends DecisionRecordPayloadV1 {
+  payloadSha256: string;
+  /** Longueur UTF-8 du JSON canonique de `DecisionRecordPayloadV1`. */
+  uncompressedBytes: number;
+  /** Diagnostic ISO ajouté par le store ; exclu du hash et du calcul. */
+  createdAt: string;
 }

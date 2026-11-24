@@ -5,7 +5,7 @@
  */
 import type { ActionEffectDelta, CharacterActionRuntime } from './action';
 import type { CharacterEmotions, CharacterNeeds, CharacterTraits, EmotionKey, NeedKey, TraitKey } from './character';
-import type { DecisionExplanation } from './decision';
+import type { DecisionExplanation, DecisionRecordPayloadV1 } from './decision';
 
 /** Précision décimale des valeurs évolutives (centièmes). */
 export const SIMULATION_VALUE_PRECISION = 2;
@@ -116,6 +116,8 @@ export interface CharacterTickInput {
   decisionParams?: Partial<DecisionParameters>;
   /** Runtime par identifiant ; valeur par défaut si absent. */
   actionRuntimeByCharacter?: Readonly<Record<string, CharacterActionRuntime>>;
+  /** Noms affichés copiés dans l'historique ; sans effet sur les règles. */
+  characterNameByCharacterId?: Readonly<Record<string, string>>;
 }
 
 /** Résultat pur d'un tick : aucun effet Electron/SQLite. */
@@ -131,6 +133,8 @@ export interface CharacterTickResult {
   deltas: TickDelta[];
   /** Explications complètes, calculées même pour une action poursuivie. */
   decisions: DecisionExplanation[];
+  /** Charges utiles d'historique, indexées comme `decisions`. */
+  decisionRecords: DecisionRecordPayloadV1[];
   actionDeltas: ActionEffectDelta[];
   actionRuntimeStates: Array<{ characterId: string; runtime: CharacterActionRuntime }>;
   warnings: string[];

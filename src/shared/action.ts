@@ -28,6 +28,16 @@ export type DecisionRule =
   | 'interruption'
   | 'action_failed';
 
+/** Source runtime unique des règles de décision (validation de l'historique 3D-A). */
+export const DECISION_RULES: readonly DecisionRule[] = [
+  'score_tiebreak_rng',
+  'score_tiebreak_id',
+  'forced_idle',
+  'continue_active',
+  'interruption',
+  'action_failed',
+] as const;
+
 export interface ActionEffects {
   needs: Partial<Record<NeedKey, number>>;
   emotions: Partial<Record<EmotionKey, number>>;

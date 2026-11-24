@@ -7,6 +7,7 @@
  */
 import {
   ACTION_IDS,
+  DECISION_RULES,
   createDefaultActionRuntime,
   type ActionId,
   type CharacterActionRuntime,
@@ -14,10 +15,7 @@ import {
 } from '../../shared/action';
 
 const ACTION_SET = new Set<string>(ACTION_IDS);
-const DECISION_RULES = new Set<string>([
-  'score_tiebreak_rng', 'score_tiebreak_id', 'forced_idle',
-  'continue_active', 'interruption', 'action_failed',
-]);
+const DECISION_RULE_SET = new Set<string>(DECISION_RULES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -78,7 +76,7 @@ export function parseActionRuntime(raw: unknown): CharacterActionRuntime {
     if (!isRecord(source.lastDecision)) throw new Error('Runtime d’action invalide : lastDecision incorrect.');
     const tick = requireInteger(source.lastDecision.tick, 'lastDecision.tick', 0);
     const actionId = requireActionId(source.lastDecision.actionId, 'lastDecision.actionId');
-    if (typeof source.lastDecision.rule !== 'string' || !DECISION_RULES.has(source.lastDecision.rule)) {
+    if (typeof source.lastDecision.rule !== 'string' || !DECISION_RULE_SET.has(source.lastDecision.rule)) {
       throw new Error('Règle de décision inconnue dans lastDecision.');
     }
     if (typeof source.lastDecision.reason !== 'string') throw new Error('Raison de décision invalide.');
