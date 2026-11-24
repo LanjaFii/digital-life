@@ -2,6 +2,36 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3C, tranche 2 (services purs de décision et d'action)
+
+### Added
+- `src/main/services/goal-selection.service.ts` : urgences des besoins (criticité + tendance) et des émotions (direction), signal circadien, motivations regroupées en objectifs immédiats, tri stable, exclusions tracées.
+- `src/main/services/action-candidacy.service.ts` : évaluation de toutes les préconditions (dont `any_of`, cooldown et environnement), Tier B toujours exclu, `idle` toujours faisable.
+- `src/main/services/action-scoring.service.ts` : scoring déterministe et borné `[-5, 5]`, quantification à 3 décimales, traits/coût/répétition/durée/circadien, `idle = 0`.
+- `src/main/services/decision-engine.service.ts` : poursuite d'action longue, interruption conditionnée par 4 critères, règles d'échec, `forced_idle`, départage par identifiant ou PRNG (un seul tirage), `DecisionExplanation` complète.
+- `src/main/services/action-runtime.service.ts` : parse strict et sérialisation du runtime, transitions démarrer/poursuivre/interrompre/échouer, cooldowns, historique borné.
+- `src/main/services/action-execution.service.ts` : effets nominaux modulés par les traits et bornés par la marge, baseline des émotions négatives, quantification unique, `ActionEffectDelta`, refus du Tier B et des effets non numériques.
+- `tests/phase3c-fixtures.ts` et six fichiers de test : 51 tests unitaires des services (affamé, anxieux, sociable/indépendant, coûts, répétition, nuit, faisabilité, cooldown, départage rejeable, poursuite, interruption, échec, corruption, bornes d'effets).
+
+### Changed
+- `src/shared/decision.ts` : `GoalSelectionInput`, `DecisionRng`, `interruptionScored` (deuxième jeu de candidats évalué sans action active).
+- `src/shared/simulation-rules.ts` : `AutonomousDecisionSnapshot.hour` issu de l'horloge logique.
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md` : calibration `EMOTION_WEIGHT = 10` justifiée, sept services documentés, rôle de `interruptionScored`, état d'implémentation tranche 2.
+- `PROGRESS.md`, `HANDOFF.md`, `README.md` : état après la tranche 2.
+
+### Fixed
+- Aucun bug applicatif corrigé ; le tick reste strictement identique à la Phase 3B.
+
+### Removed
+- Aucun.
+
+### Technical decisions
+- `EMOTION_WEIGHT` passe de la valeur documentée `0.35` à `10` : avec `0.35`, un effet émotionnel nominal de −1 devenait −0.0035 de score et ne pouvait départager aucun scénario. La valeur reste configurable dans `DecisionParameters`.
+- Une action active rend les alternatives infaisables via `no_active_action` : un second jeu de candidats calculé avec `active = null` est indispensable pour que la quatrième condition d'interruption puisse être vraie.
+- Un échec d'action est une décision métier (`selectionRule = 'action_failed'`), pas une erreur de tick ; les effets déjà appliqués aux ticks précédents ne sont pas annulés.
+- Un runtime corrompu reste une erreur technique avec rollback du tick ; `parseActionRuntime` ne répare jamais silencieusement.
+- Validations : check-deps OK, typecheck 4 configs OK, tests **209/209** (22 fichiers), build OK.
+
 ## 2026-11-24 — Phase 3C, tranche 1 (contrats partagés et catalogue d'actions)
 
 ### Added

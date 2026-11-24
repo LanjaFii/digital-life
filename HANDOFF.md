@@ -3,19 +3,18 @@
 ## Où en est le développement
 
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
-- **HEAD au démarrage de l'implémentation** : `c18e4814391f2971224e77be2b7e77895af4e188`
-  (`docs(phase3c): specify autonomous decision and action architecture`), identique à
-  `origin/main`, arbre propre.
-- **Tranche courante** : **Phase 3C — implémentation progressive**. Tranche 1 terminée :
-  contrats partagés, catalogue versionné et recette documentée de `forkFromStopped`.
-  Aucune décision ni effet d'action n'est encore intégré au tick ; aucun schéma SQLite,
-  IPC, preload, UI ni appel LLM modifié.
+- **HEAD au démarrage de la tranche 2** : `033fced4fca62ff90ed4c498cde751c10326bd87`
+  (`feat(phase3c): add action contracts and registry`), identique à `origin/main`, arbre propre.
+- **Tranche courante** : **Phase 3C — implémentation progressive**. Tranches 1 et 2
+  terminées : contrats, catalogue, sept services purs et 51 tests unitaires dédiés.
+  Aucun service n'est encore appelé par le tick ; aucun schéma SQLite, IPC, preload, UI
+  ni appel LLM modifié.
 - **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution
-  passive déterministe des 8 besoins et 10 émotions. Le résultat de tick contient désormais
-  trois tableaux vides (`decisions`, `actionDeltas`, `actionRuntimeStates`) en attente de la
-  tranche 2. **Aucune décision ni action autonome exécutable** n'existe encore. Aucun
-  environnement, lieu, objet, ressource partagée, relation, événement, souvenir, mort ni
-  dialogue n'existe.
+  passive déterministe des 8 besoins et 10 émotions. Le résultat de tick contient toujours
+  trois tableaux vides (`decisions`, `actionDeltas`, `actionRuntimeStates`) en attente de
+  l'intégration (tranche 3). **Aucune décision ni action autonome n'est encore exécutée par
+  le moteur.** Aucun environnement, lieu, objet, ressource partagée, relation, événement,
+  souvenir, mort ni dialogue n'existe.
 
 ## Ce qui vient d'être réalisé (Phase 3C — documentaire)
 
@@ -53,9 +52,32 @@
 - `tests/action-registry.test.ts` : 10 tests du catalogue.
 - Validations : check-deps OK, typecheck 4 configs OK, tests **158/158** (16 fichiers).
 
+## Ce qui vient d'être réalisé (Phase 3C — tranche 2)
+
+- `src/main/services/goal-selection.service.ts` : criticités des besoins, direction des
+  émotions, pressions avec tendance, signal circadien, regroupement en objectifs immédiats.
+- `src/main/services/action-candidacy.service.ts` : toutes les préconditions évaluées depuis
+  le snapshot ; Tier B toujours rejeté ; `idle` toujours faisable.
+- `src/main/services/action-scoring.service.ts` : score borné `[-5, 5]` quantifié à 3
+  décimales, `idle = 0`, répétition et durée pénalisées, bonus nuit pour `sleep`.
+- `src/main/services/decision-engine.service.ts` : poursuite, interruption (4 conditions),
+  échec, `forced_idle`, départage `id` ou PRNG (1 tirage maximum), explication complète.
+- `src/main/services/action-runtime.service.ts` : parse strict, sérialisation, transitions,
+  cooldowns, historique borné, compteur d'interruption.
+- `src/main/services/action-execution.service.ts` : gains bornés par la marge, baseline des
+  émotions négatives, trait multiplier, quantification unique, `ActionEffectDelta`, refus des
+  effets non numériques.
+- `tests/phase3c-fixtures.ts` et six fichiers de test : **51 tests**, scénarios affamé,
+  anxieux, sociable/indépendant, coûts critiques, répétition, nuit, cooldown, départage
+  rejeable, poursuite, interruption, échec, corruption, bornes d'effets.
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md` : `EMOTION_WEIGHT = 10` justifié (0.35 rendait les
+  émotions négligeables), sept services, rôle de `interruptionScored`, état d'implémentation.
+- Validations : check-deps OK, typecheck 4 configs OK, tests **209/209** (22 fichiers), build OK.
+
 ## Décisions de conception Phase 3C
 
-- **Périmètre** : tranche strictement documentaire ; aucune modification applicative.
+- **Périmètre** : conception documentaire validée ; implémentation progressive sans
+  modification du comportement Phase 3B tant que l'intégration n'est pas livrée.
 - **Ordre du tick** : besoins projetés → émotions projetées → motivations → objectifs
   immédiats → candidats → scoring → décision → effets → **une seule** quantification finale.
 - **Snapshot cohérent** : tous les personnages décident depuis le même état de début de
@@ -104,17 +126,17 @@
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : OK.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : OK (4 tsconfigs).
-- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **148/148 OK** (15 fichiers).
+- `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/test.mjs` : **209/209 OK** (22 fichiers).
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/build.mjs` : OK.
-- Aucune donnée utilisateur lue ni modifiée ; aucun smoke Electron nécessaire (aucun code
-  runtime modifié).
+- Aucune donnée utilisateur lue ni modifiée ; aucun smoke Electron nécessaire (services purs,
+  aucun chemin runtime Electron/SQLite modifié).
 
 ## Problèmes / points d'attention
 
 - `simulation_stopped` reste terminal pour `start/resume` : ne pas contourner cette garde
   avant validation produit de la recommandation §12 du document principal.
-- Les scénarios Phase 3C sont des **tests futurs** : aucune assertion n'a été ajoutée,
-  aucun service n'a été créé. Ne pas présenter la simulation comme autonome.
+- Les services Phase 3C existent et sont testés, mais le tick ne les appelle pas encore.
+  Ne pas présenter la simulation comme autonome avant l'intégration (tranche 3).
 - Les seuils numériques de décision (scoring, urgences, durées, cooldowns, détection des
   boucles) sont des hypothèses configurables, à calibrer par simulation longue avant
   implémentation définitive.
@@ -163,10 +185,18 @@ bash scripts/dev.sh
 
 ## Prochaine tâche recommandée
 
-1. **Finaliser la tranche Git Phase 3C** : vérifier diff/absence secrets/data, committer,
-   pousser `origin/main` sans force, vérifier hash local = distant et arbre propre.
+1. **Finaliser la tranche Git de la tranche 2** : vérifier diff/absence secrets/data,
+   committer, pousser `origin/main` sans force, vérifier hash local = distant et arbre propre.
    **Arrêt à cette étape si le push échoue.**
-2. Ensuite uniquement sur validation explicite : implémenter la Phase 3C en respectant
-   l'ordre, les contrats proposés et la calibration par simulations longues.
-3. **Décision produit toujours à trancher** : politique `simulation_stopped`
+2. Intégrer les sept services dans `character-tick.service.ts` : construire le snapshot
+   étendu par personnage, calculer les deux jeux de candidats (courant et post-interruption),
+   séquencer le PRNG par `characterId` trié, appliquer les effets sur les valeurs projetées
+   avant quantification, property `decisions`/`actionDeltas`/`actionRuntimeStates`.
+3. Ajouter `current_action_json` (TEXT, valeur par défaut du runtime) et l'écrire dans la
+   même transaction SQLite que les états, l'horloge et `rngState`, avec un seul `persist(db)`.
+   Toute runtime corrompu doit provoquer un rollback complet.
+4. Étendre `tests/world-store.test.ts` et `tests/simulation-long.test.ts` : affamé, fatigué,
+   anxieux, sociable, indépendant, besoins concurrents, action impossible/interrompue/longue,
+   plusieurs personnages, reprise après redémarrage, rejeu déterministe, rollback complet.
+5. **Décision produit toujours à trancher** : politique `simulation_stopped`
    (nouvelle branche recommandée). Ne pas implémenter de reprise implicite.

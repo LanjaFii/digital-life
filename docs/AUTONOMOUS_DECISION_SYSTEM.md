@@ -211,9 +211,15 @@ rawScore =
 - `repetitionPenalty = min(1, occurrences dans recentActionIds / ACTION_HISTORY_SIZE)`.
 - `DECISION_SCORE_PRECISION` [proposé] = 3 décimales : évite les ex æquo dus au flottant
   tout en restant lisible dans les explications.
-- Poids [hypothèses configurables] : `NEED_WEIGHT = 1.0`, `EMOTION_WEIGHT = 0.35`,
+- Poids [hypothèses configurables] : `NEED_WEIGHT = 1.0`, `EMOTION_WEIGHT = 10`,
   `TRAIT_WEIGHT = 0.25`, `CIRCADIAN_WEIGHT = 0.10`, `COST_WEIGHT = 0.8`,
   `REPETITION_WEIGHT = 0.30`, `DURATION_WEIGHT = 0.05`.
+- **Calibration révisée à l'implémentation (tranche 2)** : la valeur documentée initialement
+  (`EMOTION_WEIGHT = 0.35`) rendait un effet émotionnel nominal de −1 (soit −0.01 après
+  division par 100) négligeable devant un gain de besoin. `10` transforme ce même effet en
+  +0.10 de score après alignement, ce qui permet à un personnage anxieux de choisir une
+  action calmante. La valeur reste `DecisionParameters.emotionWeight` et peut être recalibrée
+  sans toucher au code ; tout changement doit être accompagné des tests de scénario.
 
 ### 7.2 Propriétés testables
 
@@ -431,7 +437,7 @@ Cette recette n'est **pas implémentée** dans la tranche Phase 3C en cours.
 
 ## 13. Compatibilité services existants
 
-### 13.1 Découpe proposée (six services purs)
+### 13.1 Découpe retenue (sept services purs, implémentés en tranche 2)
 
 L'utilisateur proposait `decision-engine`, `action-registry`, `action-execution`,
 `goal-selection`. La découpe retenue ajoute **`action-candidacy`** et **`action-scoring`**
@@ -445,12 +451,18 @@ sans aucune précondition).
 | `goal-selection.service.ts` | Motivations et objectifs immédiats. | besoins projetés, émotions, `hour`, params | `GoalSelectionResult` | `personality-influence` (pressions) |
 | `action-candidacy.service.ts` | Candidats et évaluation des préconditions. | snapshot étendu, registre, runtime | `ActionCandidate[]` | aucun scoring |
 | `action-scoring.service.ts` | Scores, traits, coût, répétition, durée. | candidats, motivations, params | `ScoredCandidate[]` | `personality-influence.traitMultiplier` |
-| `decision-engine.service.ts` | Sélection finale, PRNG, `DecisionExplanation`. | scored candidates, `rngState`, policy | `DecisionResult` | `SeededRng` (injection) |
-| `action-execution.service.ts` | Effets sur valeurs projetées + runtime. | décision, valeurs projetées, runtime | `ActionExecutionResult` | `finalizeValue` (appelé après par l'orchestrateur) |
+| `decision-engine.service.ts` | Sélection finale, PRNG, `DecisionExplanation`. | `scored`, `interruptionScored`, `SeededRng`, params | `DecisionResult` | `SeededRng` (injection) |
+| `action-runtime.service.ts` | Parse/sérialisation et transitions du runtime. | JSON ou runtime, tick, durée, cooldown | `CharacterActionRuntime` | aucun |
+| `action-execution.service.ts` | Effets sur valeurs projetées, deltas, règles d'échec. | définition, valeurs projetées, traits, runtime actif | `ActionExecutionResult` (déjà quantifié) | `finalizeValue` une seule fois |
 
-`character-tick.service.ts` reste **l'orchestrateur unique** : il appelle ces services
-dans l'ordre du §3 et retourne un résultat enrichi. Aucun de ces services n'importe
-Electron, SQLite, le renderer ou le réseau.
+`character-tick.service.ts` reste **l'orchestrateur unique** : il appellera ces services
+dans l'ordre du §3 et retournera un résultat enrichi (intégration prévue en tranche 3).
+Aucun de ces services n'importe Electron, SQLite, le renderer ou le réseau.
+
+Deux jeux de candidats sont nécessaires : `scored` reflète l'état courant (où
+`no_active_action` rend les alternatives infaisables), tandis que `interruptionScored`
+est calculé avec `active = null` et sert **uniquement** à vérifier la quatrième condition
+d'interruption. Sans ce second jeu, aucune interruption ne pourrait jamais avoir lieu.
 
 ```mermaid
 flowchart LR
@@ -473,7 +485,7 @@ export interface CharacterTickInput {
   worldId: string; tick: number; day: number; hour: number;
   seed: number; rngState: number; characters: readonly CharacterTickSnapshot[];
   params: SimulationParametersV1;
-  // Ajouts proposés (optionnels pour compatibilité) :
+  // Ajouts implémentés (optionnels pour compatibilité) :
   decisionParams?: DecisionParameters;
   actionRuntimeByCharacter?: Readonly<Record<string, CharacterActionRuntime>>;
 }
@@ -482,7 +494,7 @@ export interface CharacterTickResult {
   // Champs Phase 3B inchangés :
   worldId: string; tick: number; rngState: number; characterStates: Array<...>;
   deltas: TickDelta[]; warnings: string[];
-  // Ajouts proposés :
+  // Ajouts implémentés (tableaux vides jusqu'à l'intégration du tick) :
   decisions: DecisionExplanation[];
   actionDeltas: ActionEffectDelta[];
   actionRuntimeStates: Array<{ characterId: string; runtime: CharacterActionRuntime }>;
@@ -556,10 +568,10 @@ d'être transformés en assertions strictes.
 ## 16. Décisions, hypothèses, reporté
 
 ### Décisions définitives
-- Tranche strictement documentaire ; aucun code, schéma, IPC, UI ou LLM modifié.
+- Conception documentaire terminée et validée ; implémentation progressive depuis la tranche 1.
 - Cycle : besoins → émotions → motivations → actions → décision → effets → quantification unique.
 - Snapshot cohérent, application différée, tri lexicographique, pas de biais d'ordre.
-- Services purs côté main, six responsabilités séparées, orchestrateur existant conservé.
+- Services purs côté main, sept responsabilités séparées, orchestrateur existant conservé.
 - Aucune action ne modifie un autre personnage ; aucune ressource partagée n'existe.
 - `current_goals_json` non écrit ; `label` non interprété.
 - Effets bornés par la marge, une seule quantification par tick.
@@ -574,8 +586,18 @@ d'être transformés en assertions strictes.
 - Seuils de détection des pathologies (§15.2).
 - Précision du score à 3 décimales, borne `[-5, 5]`.
 
+### État d'implémentation (tranche 2)
+- **Livrés** : contrats partagés et catalogue (tranche 1), puis les sept services purs
+  `action-registry`, `goal-selection`, `action-candidacy`, `action-scoring`,
+  `decision-engine`, `action-runtime` et `action-execution`, avec 51 tests unitaires dédiés.
+- **Non livré** : aucun de ces services n'est encore appelé par `character-tick.service.ts`.
+  Le tick retourne donc trois tableaux vides et le comportement Phase 3B reste inchangé.
+- Aucune colonne SQLite, migration, IPC, preload, UI, worker ni appel LLM modifié.
+- `simulation_stopped` reste terminal ; `forkFromStopped` reste une recette documentée.
+
 ### Reporté (à ne pas implémenter sans tranche dédiée)
-- Colonne `current_action_json` et migration additive ; table d'historique des actions.
+- Intégration des services au tick, colonne `current_action_json`, migration additive et
+  table d'historique des actions.
 - Hystérésis persistée des objectifs immédiats ; `CharacterGoalV2` structuré.
 - Lieux, objets, ressources, compétences → activation des actions Tier B.
 - Relations, événements, souvenirs, mort, dialogues, OpenRouter.

@@ -6,8 +6,8 @@
  * (`CharacterGoal.label`) n'est interprété.
  */
 import type { ActionEffects, ActionId, DecisionRule } from './action';
-import type { EmotionKey, NeedKey } from './character';
-import type { AutonomousDecisionSnapshot, DecisionParameters } from './simulation-rules';
+import type { CharacterEmotions, CharacterNeeds, EmotionKey, NeedKey } from './character';
+import type { AutonomousDecisionSnapshot, DecisionParameters, SimulationParametersV1 } from './simulation-rules';
 
 export type MotivationSource = 'need' | 'emotion' | 'circadian';
 
@@ -33,6 +33,22 @@ export interface ImmediateGoal {
   urgency: number;
   motivations: Motivation[];
   ruleId: 'goal.immediate.v1';
+}
+
+/** Entrée pure de la sélection des urgences et des objectifs immédiats. */
+export interface GoalSelectionInput {
+  characterId: string;
+  tick: number;
+  hour: number;
+  /** Besoins projetés du tick courant, avant effets d'action. */
+  projectedNeeds: Readonly<CharacterNeeds>;
+  /** Deltas passifs du tick, avant effets d'action. */
+  needDeltas: Readonly<Record<NeedKey, number>>;
+  emotions: Readonly<CharacterEmotions>;
+  /** Objectifs persistants lus mais jamais interprétés en Phase 3C. */
+  goals: ReadonlyArray<{ id: string; label: string; kind: 'primary' | 'secondary' }>;
+  params: SimulationParametersV1;
+  decisionParams: DecisionParameters;
 }
 
 export interface GoalSelectionResult {
@@ -89,6 +105,12 @@ export interface DecisionResult {
   rngState: number;
 }
 
+/** PRNG minimal injecté dans le moteur de décision (aucun Math.random()). */
+export interface DecisionRng {
+  next(): number;
+  getState(): number;
+}
+
 /** Entrée pure du moteur de sélection finale. */
 export interface DecisionEngineInput {
   snapshot: AutonomousDecisionSnapshot;
@@ -97,9 +119,14 @@ export interface DecisionEngineInput {
   day: number;
   hour: number;
   scored: readonly ScoredCandidate[];
+  /**
+   * Candidats réévalués avec `active = null`, utilisés uniquement pour juger
+   * une interruption. Sans eux, `no_active_action` rendrait toute alternative
+   * infaisable pendant une action longue.
+   */
+  interruptionScored?: readonly ScoredCandidate[];
   goals: GoalSelectionResult;
   params: DecisionParameters;
-  rngStateBefore: number;
-  /** Tirage au plus une fois, uniquement en cas d'ex æquo. */
-  nextRandom: () => number;
+  /** Un seul appel à next() au plus, uniquement en cas d'ex æquo réel. */
+  rng: DecisionRng;
 }

@@ -66,6 +66,8 @@ export interface CharacterTickSnapshot {
 
 /** Snapshot étendu utilisé par les règles de décision (Phase 3C). */
 export interface AutonomousDecisionSnapshot extends CharacterTickSnapshot {
+  /** Heure logique du tick, issue de l'horloge (jamais de Date.now()). */
+  hour: number;
   /** Valeur par défaut si la colonne de runtime est absente. */
   actionRuntime: CharacterActionRuntime;
   /** Deltas passifs du tick, avant tout effet d'action. */

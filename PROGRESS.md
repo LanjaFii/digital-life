@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (implémentation progressive ; tranche 1 contrats + catalogue terminée).
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C documentée et validée, **tranche 1 implémentée/validée** (contrats partagés, catalogue versionné, recette `forkFromStopped` documentée) ; services de décision, intégration au tick et persistance du runtime non encore livrés.
+- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (implémentation progressive ; tranche 2 services purs terminée).
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C documentée et validée, **tranches 1 et 2 implémentées/validées** (contrats, catalogue, sept services purs) ; intégration au tick, persistance du runtime et `forkFromStopped` non encore livrés.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD au démarrage de l'implémentation Phase 3C : `c18e4814391f2971224e77be2b7e77895af4e188` (`docs(phase3c): specify autonomous decision and action architecture`), identique à `origin/main`, arbre propre.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD au démarrage de la tranche 2 : `033fced4fca62ff90ed4c498cde751c10326bd87` (`feat(phase3c): add action contracts and registry`), identique à `origin/main`, arbre propre.
 
 ## Fonctionnalités terminées
 
@@ -88,10 +88,25 @@
 - [x] `tests/action-registry.test.ts` : validation du registre, 11 identifiants, Tier B jamais disponible, `idle` sans effet, bornes de durée, absence d'effets non numériques, règle d'échec du sommeil.
 - [x] Validations : check-deps OK, typecheck 4 configs OK, tests **158/158 passés** (16 fichiers). Build non rejoué : aucun changement de bundle dans cette tranche de contrats.
 
+## Phase 3C — Tranche 2 (services purs, terminée)
+
+- [x] Audit préalable : HEAD = `origin/main` = `033fced`, arbre propre avant toute modification.
+- [x] `src/main/services/goal-selection.service.ts` : urgences des 8 besoins / 10 émotions, signal circadien, motivations regroupées en objectifs immédiats, tri par urgence puis identifiant, exclusions tracées, aucun libellé interprété.
+- [x] `src/main/services/action-candidacy.service.ts` : évaluation de toutes les préconditions (dont `any_of` et `environment_available`), Tier B toujours infaisable, `idle` toujours faisable, ordre lexicographique stable.
+- [x] `src/main/services/action-scoring.service.ts` : formule documentée (besoins, émotions, traits, circadien, coût, répétition, durée), quantification à 3 décimales, borne `[-5, 5]`, `idle = 0`, candidats infaisables non scorés.
+- [x] `src/main/services/decision-engine.service.ts` : poursuite d'action longue, interruption conditionnée par 4 critères, règles d'échec, `forced_idle`, départage par identifiant ou PRNG (au plus un tirage), explication complète.
+- [x] `src/main/services/action-runtime.service.ts` : parse strict (corruption = erreur technique), sérialisation, démarrage/poursuite/interruption/échec, cooldowns, historique borné.
+- [x] `src/main/services/action-execution.service.ts` : effets bornés par la marge, baseline des émotions négatives, multiplicateur de traits, quantification unique, `ActionEffectDelta`, règles d'échec `keep_partial` / `abort`, refus des actions Tier B et des effets non numériques.
+- [x] `src/shared/decision.ts` : `GoalSelectionInput`, `DecisionRng`, et second jeu de candidats `interruptionScored` pour rendre l'interruption réellement évaluable.
+- [x] `src/shared/simulation-rules.ts` : `AutonomousDecisionSnapshot.hour` ajouté (horloge logique, jamais `Date.now()`).
+- [x] `tests/phase3c-fixtures.ts` + 6 fichiers de test : **51 tests** couvrant chaque service (affamé, anxieux, sociable/indépendant, coûts, répétition, nuit, faisabilité, cooldown, départage PRNG rejeable, poursuite, interruption, échec, runtime corrompu, bornes d'effets).
+- [x] `docs/AUTONOMOUS_DECISION_SYSTEM.md` : calibration `EMOTION_WEIGHT = 10` justifiée, découpe des sept services, rôle de `interruptionScored`, état d'implémentation tranche 2.
+- [x] Validations : check-deps OK, typecheck 4 configs OK, tests **209/209 passés** (22 fichiers), build éventuel à relancer avant commit de tranche. Aucun appel au tick : comportement Phase 3B inchangé.
+
 ## Fonctionnalités non commencées
 
 - [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
-- [ ] Phase 3C : tranche 1 livrée ; services de décision/action, intégration au tick et persistance du runtime restent à implémenter.
+- [ ] Phase 3C : tranches 1 et 2 livrées ; intégration des services au tick, persistance du runtime, tests SQLite et simulations longues restent à implémenter.
 - [ ] Phases 4 à 8 : relations, événements, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
 ## Conception Phase 2 (documentaire, terminée dans cette tranche)
@@ -179,6 +194,21 @@ Ajouts tranche implémentation Phase 3C — tranche 1 :
 - `src/main/services/action-registry.service.ts`
 - `tests/action-registry.test.ts`
 
+Ajouts tranche implémentation Phase 3C — tranche 2 :
+- `src/main/services/goal-selection.service.ts`
+- `src/main/services/action-candidacy.service.ts`
+- `src/main/services/action-scoring.service.ts`
+- `src/main/services/decision-engine.service.ts`
+- `src/main/services/action-runtime.service.ts`
+- `src/main/services/action-execution.service.ts`
+- `tests/phase3c-fixtures.ts`
+- `tests/goal-selection.test.ts`
+- `tests/action-candidacy.test.ts`
+- `tests/action-scoring.test.ts`
+- `tests/decision-engine.test.ts`
+- `tests/action-runtime.test.ts`
+- `tests/action-execution.test.ts`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -194,6 +224,7 @@ Ajouts tranche implémentation Phase 3C — tranche 1 :
 - Tranche implémentation Phase 3B : `src/main/services/world-store.service.ts` (tick atomique + hook de test rollback), `tests/simulation.test.ts` (intégration SQLite), `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (si mention Phase 3B).
 - Tranche conception Phase 3C (documentaire) : `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md`, `docs/SIMULATION_ENGINE.md` (encart de statut), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`. Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI ou LLM modifié.
 - Tranche implémentation Phase 3C — tranche 1 : `src/shared/simulation-rules.ts`, `src/main/services/simulation-parameters.service.ts`, `src/main/services/character-tick.service.ts` (retour vide des nouveaux tableaux), `docs/AUTONOMOUS_DECISION_SYSTEM.md` (§12.4), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`.
+- Tranche implémentation Phase 3C — tranche 2 : `src/shared/decision.ts`, `src/shared/simulation-rules.ts`, `docs/AUTONOMOUS_DECISION_SYSTEM.md` (calibration, services, état), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`. Aucun appel à ces services depuis le tick.
 
 ## Tests réussis
 
@@ -206,6 +237,7 @@ Ajouts tranche implémentation Phase 3C — tranche 1 :
 - **Validation tranche implémentation Phase 3B** : check-deps OK, typecheck 4 configs OK, tests **148/148 passés** (15 fichiers), build OK. Simulations longes 24/72/168/720/3000 ticks + 6 profils documentés : bornes 0–100 respectées, déterminisme confirmé, pas d'oscillation artificielle ni de saturation sans cause active, PRNG inchangé.
 - **Validation tranche conception Phase 3C (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **148/148 passés** (15 fichiers, aucun code modifié), build OK. Vérification croisée : 3 documents créés avec diagrammes Mermaid, contrats TypeScript proposés, distinction décisions définitives / hypothèses / reporté, audit Git (HEAD = `origin/main` = `1b39145`, arbre propre avant tranche), aucun secret ni fichier généré ajouté.
 - **Validation tranche implémentation Phase 3C — tranche 1** : check-deps OK, typecheck 4 configs OK, tests **158/158 passés** (16 fichiers). Aucun build rejoué : contrats purs uniquement, aucun bundle modifié. Audit Git avant tranche : HEAD local = `origin/main` = `c18e481`, arbre propre, `git fetch origin --dry-run` sans changement.
+- **Validation tranche implémentation Phase 3C — tranche 2** : check-deps OK, typecheck 4 configs OK, tests **209/209 passés** (22 fichiers, dont 51 tests des services purs), build OK. Audit Git avant tranche : HEAD local = `origin/main` = `033fced`, arbre propre. Aucun appel des services depuis le tick : comportement Phase 3B inchangé.
 
 ## Tests échoués
 
@@ -228,4 +260,4 @@ Ajouts tranche implémentation Phase 3C — tranche 1 :
 
 ## Prochaine tâche précise
 
-Finaliser la tranche Git de la tranche 1 (inspection diff, absence secrets/data, commit, push `origin/main` sans force, vérification hash distant et arbre propre). Ensuite : implémenter les services purs `goal-selection`, `action-candidacy`, `action-scoring`, `decision-engine`, `action-execution` avec leurs tests unitaires ; puis seulement intégrer au tick et à SQLite. La politique `forkFromStopped` reste documentée et **non implémentée** tant que le produit ne l'a pas validée. Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.
+Finaliser la tranche Git de la tranche 2 (inspection diff, absence secrets/data, commit, push `origin/main` sans force, vérification hash distant et arbre propre). Ensuite : intégrer les sept services purs dans `character-tick.service.ts` (snapshot étendu, second jeu de candidats pour interruption, PRNG séquencé par identifiant, effets appliqués une seule fois), ajouter la colonne additive `current_action_json` et sa persistance transactionnelle dans `world-store.service.ts`, puis étendre les tests SQLite et les simulations longues. La politique `forkFromStopped` reste documentée et **non implémentée** tant que le produit ne l'a pas validée. Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.
