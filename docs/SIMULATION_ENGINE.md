@@ -1,5 +1,14 @@
 # Moteur de simulation — [Planifié, phase 3]
 
+> **Mise à jour Phase 3C (2026-11-24)** : le cycle 16 étapes ci-dessous reste une cible
+> **[Planifié]**. Seules les étapes 1 à 3 sont implémentées (Phase 3A/3B : horloge, besoins,
+> émotions). La conception des étapes 4 et 6 à 9 est décrite dans
+> [AUTONOMOUS_DECISION_SYSTEM.md](AUTONOMOUS_DECISION_SYSTEM.md),
+> [ACTION_SYSTEM.md](ACTION_SYSTEM.md) et
+> [GOAL_SELECTION_SYSTEM.md](GOAL_SELECTION_SYSTEM.md). Les étapes 5 et 10 à 15 restent
+> reportées (aucune mémoire, interaction, relation, événement ni mort implémentée).
+> Aucune de ces conceptions n'a été implémentée dans la tranche Phase 3C.
+
 ## Principe
 
 Le moteur est indépendant de l'interface. Il s'exécute dans un worker thread du

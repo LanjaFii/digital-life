@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3B — Évolution déterministe des besoins et émotions** (implémentée dans cette tranche : services purs + intégration tick SQLite atomique).
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B **implémentée et validée** ; comportements autonomes (décisions/actions/relations/événements/mort/LLM) non implémentés.
+- **Phase** : **Phase 3C — Système de décisions et d'actions autonomes** (conception documentaire terminée ; aucune implémentation).
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A infrastructure implémentée/validée/committée/poussée ; Phase 3B implémentée/validée/committée/poussée ; Phase 3C **documentée et validée** ; comportements autonomes (décisions/actions/relations/événements/mort/LLM) non implémentés.
 - **Dernière mise à jour** : 2026-11-24.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. Dernier commit poussé avant cette tranche : `a07d75a7f80c0d49a2e0c9475aa3254d64dd2cae` (`docs(phase3b): specify deterministic need and emotion evolution`).
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD au démarrage de cette tranche : `1b391458ee5f8bb0da27ffd05950bdfd7935b5c7` (`feat(phase3b): implement deterministic need and emotion evolution`), identique à `origin/main`, arbre propre.
 
 ## Fonctionnalités terminées
 
@@ -156,6 +156,11 @@ Ajouts tranche implémentation Phase 3B :
 - `tests/character-tick.test.ts`
 - `tests/simulation-long.test.ts`
 
+Ajouts tranche conception Phase 3C (documentaire uniquement) :
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md`
+- `docs/ACTION_SYSTEM.md`
+- `docs/GOAL_SELECTION_SYSTEM.md`
+
 ## Fichiers modifiés
 
 - Phase 0 : `tsconfig.base.json`, `tsconfig.test.json`, `src/main/ipc/app.ipc.ts`, `scripts/check-deps.mjs`, `scripts/dev.mjs`, `scripts/build.mjs`, `src/main/services/resource.service.ts`, docs mineures.
@@ -169,6 +174,7 @@ Ajouts tranche implémentation Phase 3B :
 - Tranche Phase 3A (infrastructure simulation) : `src/main/services/prng.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/world.ipc.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/shared/ipc.ts`, `src/shared/world.ts`, `src/renderer/components/WorldView.tsx`, `src/renderer/components/UseInWorldDialog.tsx`, `src/renderer/styles/global.css`, `scripts/test.mjs`, `tests/phase0.test.ts`, `tests/character-library.test.ts`, `tests/character-library-ui.test.tsx`, `tests/character-deletion-ui.test.tsx`, `tests/world-resume-ui.test.tsx`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/DEVELOPMENT.md`, `README.md`, `CHANGELOG.md`, `PROGRESS.md`, `HANDOFF.md`.
 - Tranche conception Phase 3B (documentaire) : `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (liens docs uniquement, si pertinent). Aucun fichier applicatif modifié.
 - Tranche implémentation Phase 3B : `src/main/services/world-store.service.ts` (tick atomique + hook de test rollback), `tests/simulation.test.ts` (intégration SQLite), `docs/NEEDS_EVOLUTION.md`, `docs/EMOTION_EVOLUTION.md`, `docs/CHARACTER_TICK_RULES.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md` (si mention Phase 3B).
+- Tranche conception Phase 3C (documentaire) : `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/ACTION_SYSTEM.md`, `docs/GOAL_SELECTION_SYSTEM.md`, `docs/SIMULATION_ENGINE.md` (encart de statut), `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`. Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI ou LLM modifié.
 
 ## Tests réussis
 
@@ -179,9 +185,14 @@ Ajouts tranche implémentation Phase 3B :
 - **Validation tranche conception Phase 3B (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **102/102 passés** (10 fichiers, aucun code modifié), build OK. Vérification croisée : 21 traits / 10 émotions / 8 besoins présents, 13 traits utilisés et 8 exclus avec justification, 2 diagrammes Mermaid, 5 liens de documentation valides.
 - **Smoke Electron réel Linux** (2026-11-24, `--no-sandbox --disable-gpu`, CDP, 2 lancements avec redémarrage réel) : création monde `SMOKE-SIM` (seed 123, 2 personnages), start tick 0 running, pause, step -> tick 1, vitesse 10x, fermeture, relance restaurée (tick 1, paused, `rngState=2246822416`, world `simulation_paused`), resume, step -> tick 2, suppression monde smoke, `SMOKE_OK`. DB utilisateur sauvegardée/restaurée (`/tmp/dl-worlds-backup.sqlite`) avant commit.
 - **Validation tranche implémentation Phase 3B** : check-deps OK, typecheck 4 configs OK, tests **148/148 passés** (15 fichiers), build OK. Simulations longes 24/72/168/720/3000 ticks + 6 profils documentés : bornes 0–100 respectées, déterminisme confirmé, pas d'oscillation artificielle ni de saturation sans cause active, PRNG inchangé.
+- **Validation tranche conception Phase 3C (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **148/148 passés** (15 fichiers, aucun code modifié), build OK. Vérification croisée : 3 documents créés avec diagrammes Mermaid, contrats TypeScript proposés, distinction décisions définitives / hypothèses / reporté, audit Git (HEAD = `origin/main` = `1b39145`, arbre propre avant tranche), aucun secret ni fichier généré ajouté.
+
 ## Tests échoués
 
-- Aucun.
+- Lors d'un lancement **parallèle** des quatre validations (check-deps, typecheck, tests,
+  build), le scénario « 3000 ticks » de `tests/simulation-long.test.ts` a dépassé son timeout
+  de 5 s (147/148). Relance isolée immédiate : **148/148 OK**. Aucun code modifié ; ne pas
+  paralléliser ces commandes sur cet environnement.
 
 ## Bugs connus
 
@@ -197,4 +208,4 @@ Ajouts tranche implémentation Phase 3B :
 
 ## Prochaine tâche précise
 
-Finaliser la tranche Git (vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre). Ensuite uniquement sur validation explicite : Phase 3C (décisions/actions autonomes) ou reprise d'un monde `simulation_stopped` (transition explicite à définir avant implémentation). Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.
+Finaliser la tranche Git Phase 3C (vérifier diff/absence secrets/data, committer, pousser `origin/main` sans force, vérifier hash distant et arbre propre). Ensuite, uniquement sur validation explicite : implémentation Phase 3C (décisions/actions autonomes) en suivant les trois documents de conception, ou politique de reprise d'un monde `simulation_stopped` (branche explicite recommandée, à valider par le produit avant implémentation). Ne pas démarrer relations/événements/souvenirs/mort/LLM sans documentation de conception dédiée.

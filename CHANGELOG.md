@@ -2,6 +2,36 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-24 — Phase 3C (conception du système de décisions et d'actions autonomes, documentaire)
+
+### Added
+- `docs/AUTONOMOUS_DECISION_SYSTEM.md` : audit Git/code complet, cycle de décision, snapshot cohérent et équité multi-personnages, scoring, sélection finale, protocole PRNG conditionnel, `DecisionExplanation`, adaptation sans action possible, découpe en six services purs, contrats TypeScript proposés, compatibilité transactionnelle, politique `simulation_stopped`, scénarios et critères de détection des boucles/répétitions/besoins négligés/inactivité.
+- `docs/ACTION_SYSTEM.md` : catalogue extensible de 11 actions (dont `idle`), séparation Tier A immédiatement réalisable / Tier B nécessitant un environnement futur, préconditions, gains/coûts/effets nominaux, influence explicite des traits, machine à états des actions longues, interruption, échec, cooldown, règles d'extension du registre.
+- `docs/GOAL_SELECTION_SYSTEM.md` : urgences des 8 besoins et 10 émotions, motivations concurrentes, objectifs immédiats non persistés, non-interprétation de `CharacterGoal.label`, hystérésis et `CharacterGoalV2` reportés, contrats proposés, tests prévus.
+- Trois diagrammes Mermaid au minimum (cycle, machine à états d'action, flux services) et des contrats TypeScript **proposés**, aucun n'étant implémenté.
+
+### Changed
+- `docs/SIMULATION_ENGINE.md` : encart précisant que le cycle 16 étapes reste [Planifié] et renvoyant vers les trois documents Phase 3C.
+- `README.md` : liens vers les trois nouveaux documents, statut Phase 3C documentaire, correction du nombre de tests (148/148).
+- `PROGRESS.md`, `HANDOFF.md` : état Phase 3C, HEAD de départ `1b391458ee5f8bb0da27ffd05950bdfd7935b5c7`, prochaine tâche.
+
+### Fixed
+- Divergence documentaire relevée : `docs/CHARACTER_TICK_RULES.md` mentionnait un tri `localeCompare` alors que le code réel (`orderSnapshots()`) utilise une comparaison lexicographique directe ; la conception Phase 3C s'aligne sur le code.
+- Relecture des contrats Phase 3C : urgence de tendance mesurée sur l'excès de dégradation (pas sur la dérive normale), alignement explicite du signe des effets émotionnels dans le score, source de `otherCharacterExists` explicitée, regroupement déterministe des motivations en objectifs immédiats, hystérésis dotée de l'état d'urgence nécessaire.
+
+### Removed
+- Aucun.
+
+### Technical decisions
+- Tranche **strictement documentaire** : aucun code applicatif, schéma SQLite, migration, worker, IPC, preload, UI ni appel LLM modifié. Aucune table `actions`, aucune colonne de runtime créée.
+- Ordre de tick retenu : évolution passive Phase 3B inchangée → motivations/objectifs immédiats → candidats → scoring → décision → effets sur valeurs projetées → **quantification unique**.
+- Aucune action ne modifie un autre personnage ; aucune ressource partagée n'existe en Phase 3C, donc aucun conflit d'ordre à arbitrer maintenant.
+- `current_goals_json` n'est jamais écrit par le moteur ; les `label` d'objectifs (texte libre) ne sont pas interprétés (LLM interdit pour la décision).
+- PRNG : au plus un tirage par personnage et par tick, uniquement en cas d'ex æquo de score ; `rngState` tracé et persisté dans la transaction ; `tieBreak: 'id'` conservé pour les rejeux de test.
+- `simulation_stopped` : comportement actuel inchangé ; recommandation documentaire = nouvelle branche explicite depuis l'état arrêté, à valider avant implémentation.
+- Toutes les valeurs numériques de décision sont des **hypothèses configurables** à calibrer ; seules les règles structurelles sont décidées définitivement.
+- Validations : check-deps OK, typecheck 4 configs OK, tests **148/148** (15 fichiers, exécution isolée), build OK.
+
 ## 2026-11-24 — Phase 3B (implémentation de l'évolution déterministe des besoins et émotions)
 
 ### Added
