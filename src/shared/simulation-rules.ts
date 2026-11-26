@@ -10,18 +10,26 @@ import type { DecisionExplanation, DecisionRecordPayloadV1 } from './decision';
 /** Précision décimale des valeurs évolutives (centièmes). */
 export const SIMULATION_VALUE_PRECISION = 2;
 
+/** Version des paramètres de règles ; source unique pour le protocole et l'historique. */
+export const SIMULATION_PARAMETERS_VERSION = 1 as const;
+
+/** Causes autorisées d'un delta explicable, ordre stable de référence. */
+export const TICK_DELTA_CAUSE_KINDS = [
+  'base_decay', 'need_deficit', 'comfort', 'emotion_pressure', 'emotion_target',
+  'trait_modifier', 'baseline_recovery', 'action_effect', 'clamp', 'rounding',
+] as const;
+
+/** Clés exactes des paramètres de décision surchargeables. */
+export const DECISION_PARAMETER_KEYS = [
+  'tieBreak', 'decisionScorePrecision', 'maxRngDrawsPerCharacterTick',
+  'needWeight', 'emotionWeight', 'traitWeight', 'circadianWeight',
+  'costWeight', 'repetitionWeight', 'durationWeight', 'minimumMotivationUrgency',
+  'immediateGoalLimit', 'criticalUrgency', 'trendWeight', 'referenceDecayFloor',
+  'maxActionDurationTicks', 'actionHistorySize', 'minTicksBeforeInterrupt',
+] as const;
+
 /** Origine d'une contribution à un delta, utilisée pour l'explicabilité. */
-export type TickDeltaCauseKind =
-  | 'base_decay'
-  | 'need_deficit'
-  | 'comfort'
-  | 'emotion_pressure'
-  | 'emotion_target'
-  | 'trait_modifier'
-  | 'baseline_recovery'
-  | 'action_effect'
-  | 'clamp'
-  | 'rounding';
+export type TickDeltaCauseKind = (typeof TICK_DELTA_CAUSE_KINDS)[number];
 
 export interface TickDeltaCause {
   kind: TickDeltaCauseKind;

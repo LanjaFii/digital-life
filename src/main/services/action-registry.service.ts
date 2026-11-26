@@ -8,6 +8,7 @@
 import {
   ACTION_HISTORY_SIZE,
   ACTION_IDS,
+  ACTION_REGISTRY_VERSION,
   MAX_ACTION_DURATION_TICKS,
   type ActionDefinition,
   type ActionId,
@@ -23,7 +24,7 @@ const traitSet = new Set<string>(TRAIT_KEYS);
 const actionSet = new Set<string>(ACTION_IDS);
 
 export const ACTION_REGISTRY: ActionRegistry = {
-  version: 1,
+  version: ACTION_REGISTRY_VERSION,
   definitions: {
     eat: {
       id: 'eat',

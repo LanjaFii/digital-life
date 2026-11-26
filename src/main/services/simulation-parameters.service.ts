@@ -6,10 +6,10 @@
  * configurables via SimulationParametersV1 : aucun coefficient n'est choisi
  * pour forcer un résultat artificiallement satisfaisant.
  */
-import type { SimulationParametersV1 } from '../../shared/simulation-rules';
+import { SIMULATION_PARAMETERS_VERSION, type SimulationParametersV1 } from '../../shared/simulation-rules';
 
 export const DEFAULT_SIMULATION_PARAMETERS: SimulationParametersV1 = {
-  version: 1,
+  version: SIMULATION_PARAMETERS_VERSION,
   // Décision définitive : centièmes stockés dans les colonnes JSON existantes.
   precision: 2,
   deficitThreshold: 60,

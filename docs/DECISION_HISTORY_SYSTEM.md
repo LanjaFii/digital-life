@@ -7,10 +7,10 @@
 > La tranche 3D-A ajoute uniquement l'historique technique : aucun IPC, preload, UI,
 > worker, verrou global ni changement de persistance fichier n'est concerné.
 >
-> **Statut : tranches 3D-A et 3D-B implémentées et validées.** Le calcul Phase 3C reste
-> byte-identique à entrées égales (Golden Hash). La suite passe 264/264 (hors test long et
-> benchmark), le test long isolé passe 9/9, typecheck des quatre configurations et build
-> réussis. Les tranches 3D-C et 3D-D restent à faire.
+> **Statut : tranches 3D-A, 3D-B, 3D-C1 et 3D-C2 implémentées et validées.** Le calcul Phase 3C
+> reste byte-identique à entrées égales (18 Golden Hash inchangés, matrice étendue 96/96 en test
+> long isolé). La suite passe 279/279 (hors tests longs et benchmark), typecheck des quatre
+> configurations et build réussis. L'intégration 3D-C3 et les tranches 3D-C4/3D-D restent à faire.
 
 ## 1. Deux notions distinctes
 
@@ -108,7 +108,9 @@ Corrections apportées avant l'implémentation, afin de préserver le détermini
   `new Date().toISOString()`. Il n'est jamais lu par une règle métier, jamais inclus dans
   le Golden Hash, jamais inclus dans `payloadSha256` ni dans `uncompressedBytes`.
 - `payloadSha256` est le SHA-256 de `canonicalDecisionPayload(payload)`, où le canonicaliseur
-  trie récursivement les clés et refuse `undefined`, `NaN` et l'infini.
+  trie récursivement les clés et refuse `undefined`, `NaN` et l'infini. Ce canonicaliseur
+  strict reste réservé à l'intégrité des enregistrements : il ne doit pas être confondu avec
+  la sérialisation du noyau Golden Hash utilisée comme checksum du worker (§9).
 - `uncompressedBytes` est la taille en octets UTF-8 de ce même JSON canonique de la charge
   utile. Cette définition évite une référence circulaire et rend la valeur indépendante de
   l'horloge.
@@ -333,8 +335,10 @@ Aucune écriture, aucune suppression et aucun déclenchement de tick via ces can
 
 **Golden Hash (18 scénarios, `tests/decision-golden-hash.test.ts`)**
 
-- mêmes seed/entrées/règles => même JSON canonique du calcul Phase 3C, avant et après 3D-A et avant le futur passage au worker ;
-- chaque enregistrement produit sur ces simulations longues (jusqu'à 720 ticks) est soumis à la validation stricte.
+- mêmes seed/entrées/règles => même noyau canonique du calcul Phase 3C, avant et après 3D-A/3D-B et avant le futur passage au worker ; les 18 valeurs historiques restent inchangées ;
+- le noyau exclut `decisionRecords`, conformément à l'arbitrage P2 : le checksum du protocole worker utilise exactement cette définition, distincte du `payloadSha256` par décision ;
+- en 3D-C1, le canonicaliseur strict, `collectRuleIds()` et la sérialisation du noyau Golden Hash ont été extraits dans `src/shared/canonicalization.ts`, avec réexports depuis `decision-record.service.ts` ; les 18 hashes attendus sont inchangés ;
+- chaque enregistrement produit sur ces simulations longues (jusqu'à 720 ticks) est soumis à la validation stricte, y compris la cohérence de `characterName` avec l'entrée du tick.
 
 ## 10. Hors périmètre
 

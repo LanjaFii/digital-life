@@ -143,6 +143,9 @@ export interface CharacterActionRuntime {
   interruptedCount: number;
 }
 
+/** Version du catalogue statique ; source unique pour le protocole et l'historique. */
+export const ACTION_REGISTRY_VERSION = 1 as const;
+
 export const ACTION_IDS: readonly ActionId[] = [
   'eat', 'drink', 'sleep', 'rest', 'wash', 'entertain_self',
   'explore', 'practice_activity', 'be_alone', 'seek_company', 'idle',

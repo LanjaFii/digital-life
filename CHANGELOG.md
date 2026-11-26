@@ -2,6 +2,48 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-26 — Phase 3D-C1 et 3D-C2 (protocole et worker non branché)
+
+### Added
+- `src/shared/worker-protocol.ts` : protocole versionné `protocolVersion = 1`, contrats `ComputeTickRequest`/`ComputeTickResponse`/`ComputeWorkerReadyMessage`, validateurs stricts, erreurs corrélées ou non via `WorkerProtocolError`.
+- `src/shared/canonicalization.ts` : `canonicalize()` stricte, `canonicalizeGoldenTickResult()` (noyau historique sans `decisionRecords`), `extractGoldenTickCore()` et `collectRuleIds()` partagés.
+- `src/shared/decision-validation.ts` : validateurs purs extraits du service d'intégrité, avec réexports conservés ; versions et listes centralisées dans `src/shared/action.ts` et `src/shared/simulation-rules.ts`.
+- `src/main/services/tick-writer.service.ts` : frontière d'écriture du tick extraite de `stepSimulation()` sans changement de transaction ni de façade.
+- `src/main/simulation/tick-compute.worker.ts` : worker de calcul autonome et non branché, `ready`, checksum SHA-256, réponses validées, aucune écriture ni état résiduel.
+- Tests : `worker-tick-protocol` (8), `tick-writer` (4), `worker-tick-parity` (3), fixtures partagées et matrice Golden Hash longue (96 scénarios figés).
+
+### Changed
+- `tests/decision-golden-hash.test.ts` utilise la sérialisation partagée : les 18 valeurs historiques restent inchangées.
+- `src/main/services/character-tick.service.ts` importe `collectRuleIds()` depuis le module partagé ; `world-store.service.ts` délègue l'écriture au tick-writer ; `decision-record.service.ts` réexporte les fonctions déplacées.
+- `PROGRESS.md`, `HANDOFF.md`, `README.md`, `docs/PHASE_3D_DESIGN.md`, `docs/WORKER_TICK_PROTOCOL.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_HISTORY_SYSTEM.md` : état réel 3D-C1/C2 et intégration encore à venir.
+
+### Technical decisions
+- Le main reste seul propriétaire de SQLite ; le worker n'a ni SQLite, ni IPC, ni fichier, ni horloge murale, ni `Math.random()`. Le calcul de production reste synchrone : aucun manager, canal IPC, UI, schéma, PRNG ou Golden Hash modifié, aucun repli silencieux.
+- Validation séquentielle : typecheck 4 configs OK, ciblés 15/15, Golden Hash 18/18, suite complète 279/279 (30 fichiers, benchmark et longs exclus), matrice longue 96/96, build avec check-deps OK.
+- Avis indépendant : ne pas démarrer 3D-C3 sans validation explicite ; aucun benchmark ni simulation longue 3B rejoué en l'absence de changement de règle.
+
+## 2026-11-26 — Arbitrages de préparation Phase 3D-C (documentation)
+
+### Added
+- `docs/PHASE_3D_DESIGN.md` §2.1 et §10 : huit arbitrages définitifs validés (P1 verrou monde étendu, P2 checksum sur le noyau Golden Hash, P3 module partagé pur, P5 tombeau/annulation avant verrous, P6 origine interne `auto`/`manual`, P7 séparation planificateur/calculateur, P8 timeout fixe 30 s, Golden Hash 18 scénarios ordinaires + matrice complète en test long isolé).
+- `docs/PHASE_3D_DESIGN.md` §4.3 : découpage validé 3D-C1 à 3D-C4 avec critères d'acceptation par sous-tranche.
+
+### Changed
+- `docs/WORKER_TICK_PROTOCOL.md` : protocole `protocolVersion = 1`, `expected.day/hour` dérivés du tick, définition du noyau haché sans `decisionRecords`, retrait de `pendingComputes` avant rejet, doublons/tardifs ignorés, erreurs `step` manuel vs tick automatique, recréation paresseuse du worker de calcul.
+- `docs/SAFE_PERSISTENCE.md` : séquence 3D-C avec `before` exporté après reprise du verrou global et avant `BEGIN`, verrou monde étendu à toute écriture IPC ciblée, suppression 3D-B vs 3D-C distinguée.
+- `docs/WORLD_STORE_REFACTORING.md` : extraction prévue de `tick-writer.service.ts` en 3D-C1 avec appel synchrone, façade et hooks conservés.
+- `docs/DECISION_HISTORY_SYSTEM.md` : distinction explicite entre `payloadSha256` strict et noyau Golden Hash utilisé comme checksum du worker.
+- `docs/CHARACTER_STATE_ARCHITECTURE.md` : correction de « futur worker unique écrivain » → main seul écrivain de `currentState`, worker de calcul sans SQLite.
+- `docs/SIMULATION_TIME_AND_ENGINE.md` : canal implémenté `simulation:status-changed`, canaux réels listés, `simulation:events` marqué `[Planifié]`, séparation planificateur/calculateur.
+- `docs/ARCHITECTURE.md`, `README.md`, `HANDOFF.md`, `PROGRESS.md` : état exact (3D-A/3D-B livrées, 3D-C1 en attente de validation propre), décisions et prochaines tâches.
+
+### Fixed
+- Contradictions documentaires résiduelles signalées et arbitrées : `expected.day/hour`, `error`/`exit`, autorité de `PHASE_3D_DESIGN.md`, tombeau avant verrous, canonicaliseur Golden vs production, verrou monde des handlers IPC.
+
+### Technical decisions
+- Aucun code applicatif, test, benchmark, schéma SQLite, worker, changement IPC/UI, commit ni push : la mission est strictement documentaire.
+- Avis indépendant maintenu : commencer par 3D-C1, puis proposer 3D-C2, 3D-C3 et 3D-C4 une par une avec validation explicite.
+
 ## 2026-11-26 — Règles de travail permanentes
 
 ### Added

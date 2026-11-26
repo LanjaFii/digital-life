@@ -252,31 +252,39 @@ Cela rend le résultat indépendant de la vitesse d'exécution et du thread.
 5. Vérifier qu'aucun `Date.now()` n'a été réintroduit dans une règle.
 6. Rejouer le même scénario depuis la même sauvegarde → résultats identiques.
 
-## 7. Frontière main / worker / IPC
+## 7. Frontière main / workers / IPC
 
 ```mermaid
 flowchart LR
-    R[\"Renderer React\"] -- \"window.digitalLife (preload)\" --> P[\"Preload\"] -- \"IPC : simulation:start/pause/step/speed/get-status\" --> M[\"Main\"] -- \"messages structurés\" --> W[\"Worker [Planifié]\"]
-    W -- \"TickResult (états, relations, événements)\" --> M
-    M -- \"validation + transaction + persist\" --> DB[(\"SQLite (main uniquement)\")]
-    M -- \"événements de progression\" --> P --> R
-    W -. \"aucun accès SQLite, aucun secret, aucun LLM\" .-> X[\"LLM (phase 6, main uniquement)\"]
+    R[\"Renderer React\"] -- \"window.digitalLife (preload)\" --> P[\"Preload\"] -- \"IPC : simulation:status/start/pause/resume/step/speed/stop\" --> M[\"Main\"]
+    M -- \"signaux tick\" --> S[\"Worker planificateur (implémenté)\"]
+    S -- \"tick(worldId)\" --> M
+    M -- \"compute-tick [Planifié 3D-C]\" --> C[\"Worker de calcul pur\"]
+    C -- \"résultat + checksum\" --> M
+    M -- \"validation + transaction + persistance atomique\" --> DB[(\"SQLite (main uniquement)\")]
+    M -- \"simulation:status-changed\" --> P --> R
+    C -. \"aucun accès SQLite, aucun secret, aucun LLM\" .-> X[\"LLM (phase 6, main uniquement)\"]
 ```
 
-- Le worker **[Planifié, phase 3]** exécute le cycle et retourne des résultats sérialisables ;
-  il ne touche **jamais** SQLite ni l'UI. Le main valide, applique la transaction et
-  persiste. C'est la frontière de confiance : validation des données et autorisation
-  restent côté main.
-- Le renderer ne reçoit que des vues (`WorldView`, fiches, journal) et des commandes ;
-  jamais d'objet de base ni de clé. `contextIsolation: true`, `nodeIntegration: false`,
-  `sandbox: true` restent obligatoires (`docs/ARCHITECTURE.md`).
-- Les canaux IPC de simulation **[Planifié]** : `simulation:start`, `simulation:pause`,
-  `simulation:resume`, `simulation:step`, `simulation:speed`, `simulation:status`,
-  `simulation:events` (abonnement aux progression). Chaque canal est ajouté à
-  `src/shared/ipc.ts`, `src/preload/preload.ts` et `src/main/ipc/` en même temps —
-  aucun bouton sans action réelle (règle AGENTS.md).
-- L'interface ne doit jamais bloquer : minuteur et calcul dans le worker, attente non
-  bloquante dans le main, rendu React indépendant du tick.
+- Le **worker planificateur** est implémenté depuis la Phase 3A : intervalles et signaux
+  `tick` par monde, sans règle métier ni SQLite.
+- Le **worker de calcul** est **[Planifié 3D-C]** : il exécute uniquement
+  `computeCharacterTick()` et renvoie un résultat sérialisable avec un checksum calculé sur
+  le noyau Golden Hash. Il ne touche ni SQLite ni l'UI. Le main valide, applique la
+  transaction et persiste : c'est la frontière de confiance.
+- `docs/PHASE_3D_DESIGN.md` fait autorité sur le périmètre 3D : relations, événements
+  canoniques et souvenirs restent hors de ce worker.
+- Le renderer ne reçoit que des vues validées (`WorldView`, fiches, journal) et des
+  commandes ; jamais d'objet de base ni de clé. `contextIsolation: true`,
+  `nodeIntegration: false`, `sandbox: true` restent obligatoires (`docs/ARCHITECTURE.md`).
+- Les canaux `simulation:status`, `simulation:start`, `simulation:pause`,
+  `simulation:resume`, `simulation:step`, `simulation:speed`, `simulation:stop` et
+  l'événement `simulation:status-changed` sont **implémentés**. Le canal
+  `simulation:events` reste **[Planifié]** et n'existe pas encore : aucun bouton ne doit
+  l'utiliser avant son implémentation réelle (règle AGENTS.md).
+- L'interface ne doit jamais bloquer : le calcul se fera dans le worker de calcul,
+  l'attente restera non bloquante dans le main (timeout fixe 30 s) et le rendu React est
+  indépendant du tick.
 
 ## 8. Tests à prévoir quand l'implémentation viendra
 

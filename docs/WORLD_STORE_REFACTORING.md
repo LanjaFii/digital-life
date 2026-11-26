@@ -5,6 +5,11 @@
 > verrou global. Le CRUD et l'écriture du tick restent dans la façade mais ne
 > touchent plus directement au fichier ni à la transaction : ils passent par les
 > nouveaux services. Aucune réécriture générale n'a été tentée.
+>
+> Les sous-tranches 3D-C1 et 3D-C2 sont implémentées et validées depuis le
+> 2026-11-26 : protocole partagé, modules canoniques et `tick-writer.service.ts`
+> extrait, worker de calcul autonome mais non branché. L'intégration 3D-C3 et le
+> nettoyage final 3D-D restent à valider séparément.
 
 ## 1. État réel après 3D-B
 
@@ -43,8 +48,13 @@ world-store.service.ts  (façade, exports stables)
   ├── world-crud.service.ts            ⏳ reste dans la façade (3D-B : verrouillé)
   ├── character-crud.service.ts        ⏳ reste dans la façade (3D-B : verrouillé)
   ├── simulation-clock.service.ts      ⏳ reste dans la façade (3D-B : verrouillé)
-  └── tick-writer.service.ts           ⏳ prévu en 3D-C avec le worker
+  └── tick-writer.service.ts           ✅ extrait en 3D-C1, appelé en synchrone
 ```
+
+En 3D-C1, `src/shared/worker-protocol.ts` et les modules partagés purs
+(`canonicalization.ts`, `decision-validation.ts`) ont été ajoutés ;
+`decision-record.service.ts` réexporte les fonctions déplacées pour conserver
+tous les imports existants.
 
 ## 3. Responsabilités livrées
 
@@ -102,6 +112,13 @@ await withDbWrite(async () => {
 le hook `_setTickFailureForTests()` ; seule l'écriture disque change. Les helpers
 de test restent exportés sous les mêmes noms.
 
+En 3D-C, `stepSimulation()` sera scindé en trois sections : lecture du snapshot
+sous verrou global, attente du worker sous verrou du monde seul, puis reprise du
+verrou global pour relire l'horloge, exporter `before` avant `BEGIN`, écrire et
+persister. L'extraction de `tick-writer.service.ts` réalisée en 3D-C1 a conservé l'appel
+**synchrone** et tous les exports publics ; aucun repli production vers le calcul
+direct n'a été introduit en 3D-C2.
+
 ## 4. Ordre d'extraction
 
 | Étape | Tranche | Extraction | État |
@@ -110,8 +127,10 @@ de test restent exportés sous les mêmes noms.
 | 2 | 3D-B | `database-connection.service.ts`, `database-schema.service.ts`, `persistence.service.ts` | livrée |
 | 3 | 3D-B | `db-write-lock.service.ts`, mise sous verrou de toutes les mutations | livrée |
 | 4 | 3D-B/3D-D | `world-crud.service.ts`, `character-crud.service.ts`, `simulation-clock.service.ts` | reportée : façade stable conservée, mutations déjà verrouillées |
-| 5 | 3D-C | `tick-writer.service.ts`, passage au worker | non commencée |
-| 6 | 3D-D | nettoyage final de la façade et documentation | non commencée |
+| 5 | 3D-C1 | `worker-protocol.ts`, modules canoniques partagés, `tick-writer.service.ts` (appel synchrone) | livrée |
+| 6 | 3D-C2 | `tick-compute.worker.ts` autonome, parité et checksum | livrée, non branchée |
+| 6b | 3D-C3 | intégration manager, verrous et annulation | non commencée |
+| 7 | 3D-D | nettoyage final de la façade et documentation | non commencée |
 
 Le report de l'étape 4 est un choix de réversibilité : déplacer le CRUD aurait
 augmenté le diff sans améliorer la garantie de persistance. La façade expose déjà
@@ -152,12 +171,15 @@ existants n'ont pas été modifiés pour s'adapter à la refactorisation.
 | Nettoyage de `worldLocks` inefficace | Promesse chaînée stockée et comparée ; test de suppression concurrente. |
 | Historique écrit hors transaction | Hook rollback 3D-A inchangé et rejoué. |
 | Gros diff | Quatre modules extraits, façade conservée, CRUD non déplacé. |
+| Réponse tardive après suppression | Tombeau et annulation avant verrous (P5), `pendingComputes` retiré avant rejet, contrôle avant `BEGIN`. |
+| Deux canonicaliseurs / trois hashes | Module partagé pur, réexports de `decision-record.service.ts`, noyau Golden Hash unique pour le checksum. |
 
 ## 7. Critères d'acceptation
 
 - Tous les imports publics existants restent valides.
-- La suite est **264/264** (27 fichiers, benchmark et test long exclus) ; 21 tests 3D-B
-  sont ajoutés et le test long isolé passe **9/9**.
+- À la livraison 3D-B, la suite était **264/264** (27 fichiers, benchmark et test long
+  exclus) ; 21 tests 3D-B ont été ajoutés et le test long isolé passait **9/9**. Après
+  3D-C1/C2, la suite est **279/279** (30 fichiers, tests longs et benchmark exclus).
 - Aucun changement de schéma ni de valeur calculée par le moteur.
 - Golden Hash 18 scénarios byte-identique.
 - Aucune mutation de la façade n'échappe à `withDbWrite`.
@@ -165,3 +187,8 @@ existants n'ont pas été modifiés pour s'adapter à la refactorisation.
   `writeFileSync`.
 - Typecheck 4 configurations et build de production OK ; `worlds.sqlite` utilisateur
   inchangé.
+
+Critères prévus pour 3D-C : façade et hooks `_...ForTests` inchangés, aucun
+repli production vers le calcul direct, 18 Golden Hash byte-identiques en suite
+ordinaire, matrice complète en test long isolé, aucune écriture depuis le worker,
+aucune écriture ciblant un monde pendant le calcul d'un tick de ce monde.

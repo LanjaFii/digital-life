@@ -9,18 +9,20 @@
 > [GOAL_SELECTION_SYSTEM.md](GOAL_SELECTION_SYSTEM.md). Les étapes 5 et 10 à 15 restent
 > reportées (aucune mémoire, interaction, relation, événement ni mort implémentée).
 >
-> **Phase 3D [3D-A/3D-B implémentées, 3D-C/3D-D planifiées]** : l'historique des décisions,
-> la persistance atomique et les verrous sont livrés ; le calcul en worker et l'inspecteur UI
-> restent décrits dans [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Le calcul reste synchrone
-> dans le main.
+> **Phase 3D [3D-A/3D-B/3D-C1/3D-C2 implémentées, 3D-C3/3D-C4/3D-D planifiées]** :
+> l'historique des décisions, la persistance atomique, les verrous, le protocole de calcul et
+> le worker autonome non branché sont livrés ; l'intégration en worker et l'inspecteur UI
+> restent décrits dans [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Le calcul de production
+> reste synchrone dans le main.
 
 ## Principe
 
 Le moteur est indépendant de l'interface. **Dans le code actuel**, le calcul des règles
 tourne dans le processus principal ; le worker `simulation.worker.ts` ne fait que
-planifier les ticks et envoyer des signaux (`tick`, `error`, `ready`). La Phase 3D propose
-un second worker dédié au calcul pur, sans déplacer SQLite. Le protocole cible est décrit
-dans [WORKER_TICK_PROTOCOL.md](WORKER_TICK_PROTOCOL.md).
+planifier les ticks et envoyer des signaux (`tick`, `error`, `ready`). La tranche 3D-C2 a
+ajouté `tick-compute.worker.ts`, module autonome dédié au calcul pur, sans déplacer SQLite
+et sans branchement sur la production. Le protocole est décrit dans
+[WORKER_TICK_PROTOCOL.md](WORKER_TICK_PROTOCOL.md).
 
 ## Cycle (16 étapes)
 

@@ -145,7 +145,8 @@ Aucune implémentation maintenant. Le contrat proposé :
 3. **Écriture atomique d'un tick** : pour un personnage, toutes les modifications de
    `current*`, relations, événements et souvenirs sont préparées en mémoire puis
    appliquées dans **une seule transaction sql.js** (`db.exec('BEGIN')` … `COMMIT`,
-   rollback sur erreur) avant un unique `persist(db)`. Cela évite un état à moitié écrit.
+   rollback sur erreur) avant une unique écriture atomique via
+   `persistSnapshotOrRestore()` (3D-B). Cela évite un état à moitié écrit.
 4. **Validité après écriture** : `clamp(0,100)`, entiers pour traits/émotions/besoins,
    clés exactes (`TRAIT_KEYS`, `EMOTION_KEYS`, `NEED_KEYS`), 1 principal + 2 secondaires.
    Réutiliser `validateCharacterDraft()` ou en extraire un validateur de state pur,
@@ -157,10 +158,12 @@ Aucune implémentation maintenant. Le contrat proposé :
 6. **Ordre des écritures** : un tick calcule toutes les décisions à partir d'un **snapshot
    cohérent** de l'état au début du tick ; les conséquences sont appliquées ensuite dans
    un ordre déterministe. Aucun personnage ne lit un état partiellement modifié par un autre.
-7. **Pas de modifications simultanées contradictoires** : le futur worker est l'unique
-   écrivain de `currentState`. Les handlers IPC restent en lecture seule pendant la
-   simulation ; les commandes de contrôle (pause/vitesse) ne touchent pas les données
-   de personnage.
+7. **Pas de modifications simultanées contradictoires** : le **main reste l'unique
+   écrivain de `currentState`**. Le worker de calcul 3D-C ne retourne qu'un résultat
+   sérialisable et n'écrit jamais SQLite. Les handlers IPC ciblant un monde prennent
+   le verrou du monde avant le verrou global (arbitrage P1) ; hors préparation,
+   `assertWorldPreparation` refuse déjà les modifications de personnage. Les commandes
+   de contrôle (pause/vitesse) ne touchent pas les données de personnage.
 8. **Pas de mutation d'objets partagés** : copie profonde à chaque lecture/écriture,
    comme le fait déjà `buildInstanceFromDraft()`. Éviter les références partagées entre
    `initialState` et `currentState`.

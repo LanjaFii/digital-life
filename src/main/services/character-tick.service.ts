@@ -48,7 +48,7 @@ import {
   startActionRuntime,
 } from './action-runtime.service';
 import { scoreActionCandidates } from './action-scoring.service';
-import { collectRuleIds } from './decision-record.service';
+import { collectRuleIds } from '../../shared/canonicalization';
 import { decideAction } from './decision-engine.service';
 import { selectImmediateGoals } from './goal-selection.service';
 import { finalizeValue } from './personality-influence.service';

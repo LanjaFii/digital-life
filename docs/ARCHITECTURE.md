@@ -6,7 +6,7 @@
 Renderer (React/Vite)  --contextBridge-->  Preload  --IPC-->  Main (Electron/Node)
                                                            ├── Simulation Manager
                                                            │   ├── Worker planificateur
-                                                           │   └── Worker de calcul [Planifié 3D]
+                                                           │   └── Worker de calcul [3D-C2, non branché]
                                                            ├── SQLite (sql.js)
                                                            ├── safeStorage (clé LLM) [Planifié]
                                                            └── LLM Service (optionnel) [Planifié]
@@ -15,9 +15,9 @@ Renderer (React/Vite)  --contextBridge-->  Preload  --IPC-->  Main (Electron/Nod
 - **Renderer** : aucune API Node, aucun `ipcRenderer` direct, aucun secret. Il envoie des commandes simulation autorisées et reçoit des statuts validés.
 - **Preload** : surface unique `window.digitalLife` définie dans `src/shared/ipc.ts`.
 - **Main** : fenêtres, handlers IPC, validation, services, persistance, contrôle des workers.
-- **Simulation Manager** (`src/main/services/simulation-manager.service.ts`) : verrou par monde, sérialisation des commandes/ticks, synchronisation du planificateur, broadcast `simulation:status-changed`.
+- **Simulation Manager** (`src/main/services/simulation-manager.service.ts`) : verrou par monde (étendu en 3D-C à toute opération IPC ciblant un monde), sérialisation des commandes/ticks, synchronisation du planificateur, broadcast `simulation:status-changed`.
 - **Worker planificateur** (`src/main/simulation/simulation.worker.ts`) : intervalles et signaux `tick` par monde ; **aucun accès SQLite, aucun accès renderer, aucune règle métier**.
-- **Worker de calcul** `[Planifié 3D]` (`src/main/simulation/tick-compute.worker.ts`) : calcul pur du tick uniquement ; le main reste seul propriétaire de SQLite. Voir [WORKER_TICK_PROTOCOL.md](WORKER_TICK_PROTOCOL.md).
+- **Worker de calcul** `[3D-C2, non branché]` (`src/main/simulation/tick-compute.worker.ts`) : calcul pur du tick uniquement ; le main reste seul propriétaire de SQLite. Voir [WORKER_TICK_PROTOCOL.md](WORKER_TICK_PROTOCOL.md).
 
 ## Répertoires
 
@@ -55,7 +55,7 @@ chiffrée via `safeStorage` (Phase 6).
 
 ## Évolutions possibles
 
-- **Phase 3D [3D-A/3D-B implémentées, 3D-C/3D-D planifiées]** : historique des décisions, verrou global d'écriture et persistance atomique livrés ; worker de calcul dédié et inspecteur UI minimal restent à faire. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md).
+- **Phase 3D [3D-A/3D-B/3D-C1/3D-C2 implémentées, 3D-C3/3D-C4/3D-D planifiées]** : historique des décisions, verrou global d'écriture, persistance atomique, protocole et worker de calcul autonome livrés ; intégration du worker et inspecteur UI minimal restent à faire. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md).
 - Ajouter des règles métier futures (relations, événements, souvenirs) en conservant transaction atomique et déterminisme.
 - Ajouter un worker d'analyse statistique distinct du worker de calcul, sans jamais donner SQLite aux workers.
 - Remplacer sql.js par better-sqlite3 uniquement si une compilation native locale est acceptée (non retenu).

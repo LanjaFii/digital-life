@@ -2,9 +2,7 @@ import type { Database } from 'sql.js';
 import { randomUUID, randomInt } from 'node:crypto';
 import type {
   CharacterDraft,
-  CharacterEmotions,
   CharacterInstance,
-  CharacterNeeds,
   CharacterListResult,
   CharacterTemplate,
   CharacterTemplateListResult,
@@ -42,14 +40,20 @@ import {
   listDecisionRecords,
   type DecisionHistoryReadQuery,
 } from './decision-history.store';
-import {
-  canonicalize,
-  finalizeDecisionRecord,
-} from './decision-record.service';
+import { finalizeDecisionRecord } from './decision-record.service';
 import { generateCharactersForWorld } from './character-generator.service';
 import { validateCharacterDraft } from './character-validation.service';
-import { parseActionRuntime, serializeActionRuntime } from './action-runtime.service';
+import { parseActionRuntime } from './action-runtime.service';
 import { DEFAULT_SIMULATION_PARAMETERS } from './simulation-parameters.service';
+import {
+  assertDecisionRecordsMatchTick,
+  buildNextClock,
+  buildTickStates,
+  setWorldStatus,
+  upsertClock,
+  writeTickCharacterStates,
+  writeTickDecisionHistory,
+} from './tick-writer.service';
 import { withDbWrite } from './db-write-lock.service';
 import {
   closeDatabaseForTests,
@@ -750,42 +754,6 @@ function simulationSeed(worldSeed: number): number {
   return (Math.trunc(worldSeed) ^ 0x85ebca6b) >>> 0;
 }
 
-function upsertClock(db: Database, clock: SimulationClock): void {
-  const stmt = db.prepare(`
-    INSERT INTO simulation_clock (
-      world_id, tick, day, hour, status, speed, rng_state, last_processed_order, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(world_id) DO UPDATE SET
-      tick = excluded.tick,
-      day = excluded.day,
-      hour = excluded.hour,
-      status = excluded.status,
-      speed = excluded.speed,
-      rng_state = excluded.rng_state,
-      last_processed_order = excluded.last_processed_order,
-      updated_at = excluded.updated_at
-  `);
-  stmt.run([
-    clock.worldId,
-    clock.tick,
-    clock.day,
-    clock.hour,
-    clock.status,
-    clock.speed,
-    clock.rngState >>> 0,
-    clock.lastProcessedOrder,
-    clock.createdAt,
-    clock.updatedAt,
-  ]);
-  stmt.free();
-}
-
-function setWorldStatus(db: Database, worldId: string, status: 'simulation_running' | 'simulation_paused' | 'simulation_stopped', updatedAt: string): void {
-  const stmt = db.prepare('UPDATE worlds SET status = ?, updated_at = ? WHERE id = ?');
-  stmt.run([status, updatedAt, worldId]);
-  stmt.free();
-}
-
 export async function recoverSimulationClocksAfterRestart(): Promise<void> {
   await withDbWrite(async () => {
       const db = await getDb();
@@ -984,74 +952,6 @@ function loadTickSnapshots(
 }
 
 /**
- * Vérifie que les charges utiles d'historique correspondent exactement aux
- * états calculés et à l'ordre des personnages avant toute écriture SQLite.
- */
-function assertDecisionRecordsMatchTick(
-  records: readonly DecisionRecordPayloadV1[],
-  states: ReadonlyArray<{
-    characterId: string;
-    needs: CharacterNeeds;
-    emotions: CharacterEmotions;
-    runtime: CharacterActionRuntime;
-  }>,
-): void {
-  if (records.length !== states.length) {
-    throw new Error('Nombre d’enregistrements de décision incohérent avec les états du tick.');
-  }
-  for (let index = 0; index < records.length; index += 1) {
-    const record = records[index];
-    const state = states[index];
-    if (record.explanation.characterId !== state.characterId) {
-      throw new Error('Ordre des enregistrements de décision incohérent avec les états.');
-    }
-    const expectedState = {
-      needs: state.needs,
-      emotions: state.emotions,
-      runtime: state.runtime,
-    };
-    if (canonicalize(record.stateAfter) !== canonicalize(expectedState)) {
-      throw new Error(`État final de décision incohérent pour ${state.characterId}.`);
-    }
-  }
-}
-
-/** Écrit les états calculés dans la transaction courante, en ordre déterministe. */
-function writeTickCharacterStates(
-  db: Database,
-  states: Array<{
-    characterId: string;
-    needs: CharacterNeeds;
-    emotions: CharacterEmotions;
-    runtime: CharacterActionRuntime;
-  }>,
-  updatedAt: string,
-): void {
-  const sorted = [...states].sort((a, b) => (a.characterId < b.characterId ? -1 : a.characterId > b.characterId ? 1 : 0));
-  const stmt = db.prepare(`
-    UPDATE characters
-    SET emotions_json=?, needs_json=?,
-        current_emotions_json=?, current_needs_json=?, current_action_json=?,
-        updated_at=?
-    WHERE id=?
-  `);
-  for (const state of sorted) {
-    const emotionsJson = JSON.stringify(state.emotions);
-    const needsJson = JSON.stringify(state.needs);
-    stmt.run([
-      emotionsJson,
-      needsJson,
-      emotionsJson,
-      needsJson,
-      serializeActionRuntime(state.runtime),
-      updatedAt,
-      state.characterId,
-    ]);
-  }
-  stmt.free();
-}
-
-/**
  * Applique exactement un tick : évolution passive, décisions autonomes, effets
  * d'action, runtime et avance de l'horloge dans une seule transaction SQLite et
  * une seule persistance atomique. Le PRNG n'est consommé qu'en cas d'ex æquo
@@ -1095,39 +995,19 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
           characterNameByCharacterId,
         });
 
-        const runtimes = new Map(result.actionRuntimeStates.map((entry) => [entry.characterId, entry.runtime]));
-        if (runtimes.size !== result.characterStates.length) {
-          throw new Error('Nombre de runtimes d’action incohérent avec les états calculés.');
-        }
-        const states = result.characterStates.map((state) => {
-          const runtime = runtimes.get(state.characterId);
-          if (!runtime) throw new Error(`Runtime d’action manquant pour ${state.characterId}.`);
-          return { ...state, runtime };
-        });
-
+        const states = buildTickStates(result);
         assertDecisionRecordsMatchTick(result.decisionRecords, states);
 
         const now = new Date().toISOString();
         writeTickCharacterStates(db, states, now);
-        const inserted = insertDecisionRecords(db, result.decisionRecords, now);
+        const inserted = writeTickDecisionHistory(db, result.decisionRecords, now);
         if (inserted !== states.length) {
           throw new Error('Écriture incomplète de l’historique des décisions.');
         }
 
         if (tickFailureForTests) tickFailureForTests();
 
-        upsertClock(db, {
-          ...prev,
-          tick: nextTick,
-          day,
-          hour,
-          // step en pause conserve la pause ; step en running conserve running
-          status: prev.status,
-          // État exact après au plus un tirage par personnage (ex æquo uniquement).
-          rngState: result.rngState >>> 0,
-          lastProcessedOrder: 0,
-          updatedAt: now,
-        });
+        upsertClock(db, buildNextClock(prev, nextTick, day, hour, result.rngState, now));
         setWorldStatus(db, id, prev.status === 'running' ? 'simulation_running' : 'simulation_paused', now);
       });
       return getSimulationStatus(id);

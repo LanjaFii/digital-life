@@ -1,10 +1,15 @@
 # Phase 3D — Consolidation du moteur
 
-> **Statut : conception validée. Les tranches 3D-A et 3D-B sont implémentées et validées ;
-> 3D-C et 3D-D restent planifiées et exigent une validation distincte.** HEAD avant conception 3D :
+> **Statut : conception validée. Les tranches 3D-A, 3D-B, 3D-C1 et 3D-C2 sont implémentées et
+> validées ; 3D-C3, 3D-C4 et 3D-D restent planifiées et exigent une validation distincte.** HEAD avant conception 3D :
 > `276384eb993e91f80a309e0864a54dbe1fdf8d53`, identique à `origin/main`. HEAD après
 > publication de la conception : `e060a07a71cad43932444ae56a00de13d72a1cf0`.
 > Ce document sert de référence d'architecture pour les tranches 3D-A à 3D-D.
+>
+> **Les arbitrages définitifs de l'audit de préparation 3D-C ont été validés le 2026-11-26**
+> (§2.1 et §10). Les sous-tranches **3D-C1 et 3D-C2 sont livrées** (protocole, canonicalisation
+> partagée, frontière d'écriture, worker autonome non branché). **3D-C3 attend une validation
+> explicite distincte** ; aucune intégration au manager n'est en place.
 
 ## 1. Périmètre retenu
 
@@ -38,6 +43,21 @@ Les vérifications directes dans le code imposent plusieurs corrections à la re
 | Verrous | Verrou global seul | **Ordre de verrou unique : verrou du monde puis verrou global d'écriture** | Le manager DETIENT déjà le verrou par monde autour des commandes/ticks. Inverser l'ordre pour la suppression créerait un risque d'interblocage. Le nettoyage de `worldLocks` comparait une promesse chaînée et ne supprimait pas l'entrée : corrigé en 3D-B. |
 | Erreurs worker | « Remonter à l'IPC » | **Step manuel : rejet IPC. Tick automatique : journalisation main, aucun état écrit, statut inchangé** | Un signal du planificateur n'a pas d'appelant IPC à qui renvoyer une erreur. |
 
+### 2.1 Arbitrages définitifs de l'audit 3D-C (2026-11-26)
+
+| Point | Décision définitive | Raison vérifiée |
+|---|---|---|
+| P1 — Verrouillage des écritures | Le **verrou du monde couvre toute opération IPC qui modifie un monde, ses personnages ou ses instances** ; l'ordre reste monde → global. | Le verrou global sera relâché pendant l'attente du worker. Sans verrou monde, une écriture concurrente pourrait s'appliquer sur un snapshot devenu périmé. |
+| P2 — Checksum | Le checksum du protocole utilise **exactement le noyau Golden Hash historique**, qui exclut `decisionRecords`. | Préserve les 18 hashes de référence et distingue le checksum de transport du `payloadSha256` de l'historique. |
+| P3 — Canonicaliseur | `canonicalize()` et `collectRuleIds()` sont extraits dans un **module partagé pur, sans dépendance Node** ; `decision-record.service.ts` conserve ses exports actuels. | Les règles et utilitaires partagés restent indépendants d'Electron/Node ; façade, imports et tests existants ne cassent pas. |
+| P5 — Suppression | Poser le **tombeau et annuler immédiatement les `pendingComputes` avant d'attendre les verrous**. | Aucune réponse tardive ne peut valider un tick pour un monde supprimé, même si le calcul est encore en attente. |
+| P6 — Origine du tick | Marqueur interne `origin: 'auto' \| 'manual'` ; erreur manuelle propagée à l'IPC, erreur automatique journalisée sans écriture ni modification de statut. | Préserve les comportements publics sans ajouter de canal IPC. |
+| P7 — Workers | Séparation stricte entre le planificateur existant et le worker de calcul ; la consultation du statut **ne recrée jamais le worker de calcul**. | Évite de retarder les signaux de planification et de confondre deux durées de vie distinctes. |
+| P8 — Timeout | Constante fixe de **30 s**, sans nouvelle surface de configuration ; toute entrée `pending` est retirée avant le rejet, doublons et réponses tardives ignorés. | Cohérent avec les timeouts de verrous déjà présents (30 s), sans paramètre utilisateur supplémentaire. |
+| Golden Hash | Les **18 scénarios historiques restent dans la suite ordinaire** ; la matrice complète profils × effectifs × horizons est exécutée dans le **test long isolé**. | Non-régression rapide à chaque validation et couverture exhaustive séparée du coût. |
+
+Ces décisions sont définitives pour la Phase 3D ; cette mission documentaire ne prend aucune nouvelle décision architecturale.
+
 Aucune suppression de champ ou de contrat n'est proposée dans cette phase. Les champs actuellement sans effet ou non interprétés sont **conservés** : `CharacterTickInput.seed`, `maxRngDrawsPerCharacterTick`, `caps.healthLoss`, `lastProcessedOrder` (validé et persisté, mais non utilisé par les règles), les `goals` de `GoalSelectionInput` (lus mais dont le libellé n'est pas interprété) et les messages `start`/`step` du worker (implémentés mais jamais envoyés par le manager). `world.seed` et `projectedEmotions` sont déjà utilisés dans le code réel et ne sont pas concernés par cette liste. Toute activation ou tout retrait fera l'objet d'une décision séparée et justifiée.
 
 ## 3. Architecture retenue
@@ -66,7 +86,7 @@ flowchart LR
 Principes :
 
 - Le **main reste le seul propriétaire de SQLite** ; aucun worker n'ouvre le fichier ni n'appelle sql.js.
-- Le worker de calcul reçoit des données sérialisables, ne dépend ni d'Electron ni de Node pour les règles, et renvoie un résultat pur.
+- Le worker de calcul reçoit des données sérialisables ; **les règles et les utilitaires partagés n'importent ni Electron ni Node** (arbitrage P3), et il renvoie un résultat pur. Le worker étant un `worker_threads` Node, le SHA-256 du checksum de transport peut y être calculé avec `node:crypto`, mais il est toujours recalculé dans le main : le hachage n'est pas une règle métier.
 - L'ordre des verrous est toujours **monde → global**. Le verrou **monde** est détenu pendant tout le tick, y compris l'attente du worker. Le verrou **global** ne couvre que les accès SQLite : lecture du snapshot, relecture de l'horloge après calcul, transaction, export et persistance. Il est relâché pendant `await compute-tick`, afin qu'un autre monde puisse écrire.
 - La transaction SQLite ne reste jamais ouverte pendant l'aller-retour worker. Le snapshot est lu sous verrou global, le calcul est attendu sous verrou monde uniquement, puis le verrou global est repris pour relire l'horloge, valider l'absence de changement, et écrire états, historique, horloge et PRNG dans une transaction courte.
 - L'export `beforeBuffer` est réalisé **après la reprise du verrou global et avant `BEGIN`**, afin de pouvoir restaurer exactement l'état mémoire du moment de l'écriture si la persistance échoue après `COMMIT`. Un export pris avant le calcul serait obsolète si un autre monde a écrit entre-temps.
@@ -85,7 +105,7 @@ Références détaillées :
 |---|---|---|---|
 | **3D-A** | Historique des décisions : contrat `DecisionRecordV1`, table `decision_records`, écriture dans le tick actuel, validation stricte, tests | Phase 3C | Une ligne par personnage et par tick, écrite dans la même transaction que l'état ; rollback sans orphelin ; anciennes sauvegardes lisibles. **Livrée et validée.** |
 | **3D-B** | Persistance sécurisée, verrou global d'écriture, refactorisation de la connexion et du schéma | 3D-A | Aucune écriture concurrente ; échec de `persist()` sans divergence mémoire/disque ; suppression de monde sérialisée. **Livrée et validée.** |
-| **3D-C** | Worker de calcul dédié, protocole, validation, Golden Hash | 3D-B | Résultats byte-identiques entre calcul direct et calcul worker sur plusieurs seeds, profils et effectifs. |
+| **3D-C** | Worker de calcul dédié, protocole, validation, Golden Hash | 3D-B | Résultats byte-identiques entre calcul direct et calcul worker ; 18 Golden Hash inchangés en suite ordinaire, matrice complète en test long isolé ; aucun tick partiel. Découpage en 3D-C1 à 3D-C4 (§4.3). |
 | **3D-D** | IPC de lecture, UI minimale, rafraîchissement, documentation finale | 3D-C | Aucun accès Node dans le renderer ; filtres bornés ; aucun tick ne déclenche un flux IPC non limité. |
 
 Chaque tranche est autonome : tests, documentation, validation séquentielle (`check-deps`, typecheck, tests, build), revue du diff, commit et push sans force sur `origin/main`.
@@ -116,18 +136,23 @@ Chaque tranche est autonome : tests, documentation, validation séquentielle (`c
 - **Risques/prévention** : interblocage → ordre unique documenté et testé ; Windows → erreur dure ; gros diff → une responsabilité par module.
 - **Exclusions** : worker de calcul, UI, changement de moteur SQLite, WAL, compression générale de la base, optimisations de persistance.
 
-### 4.3 Tranche 3D-C — Worker de calcul
+### 4.3 Tranche 3D-C — Worker de calcul (découpage définitif)
 
 - **Objectif** : déplacer uniquement le calcul pur du tick hors du thread principal, sans changer une seule valeur calculée.
-- **Périmètre** : second worker, protocole versionné, corrélation par `requestId`, validation complète dans le main, Golden Hash. Aucune transaction dans le worker.
-- **Fichiers prévus** : `src/main/simulation/tick-compute.worker.ts` (nouveau), `src/shared/worker-protocol.ts` ou extension de `src/shared/simulation-rules.ts`, `src/main/services/simulation-manager.service.ts`, `src/main/services/tick-writer.service.ts`, `src/main/services/world-store.service.ts`, tests.
-- **SQLite** : aucun changement de schéma.
-- **Contrats/services** : `ComputeTickRequest`, `ComputeTickResponse`, `pendingComputes`, validation de résultat, canonicaliseur partagé.
-- **Dépendances** : 3D-B.
-- **Tests** : messages invalides, doublons, réponses tardives, timeout, crash/recréation, deux mondes imbriqués, suppression pendant calcul, Golden Hash 1/2/10/50 personnages sur 24/72/168/720 ticks.
-- **Acceptation** : hash identique entre référence Phase 3C et worker pour chaque scénario ; aucun tick partiel ; aucune écriture depuis le worker.
-- **Risques/prévention** : divergence déterministe → un seul contrat de calcul et aucun mode hybride ; blocage UI → timeout et erreurs dures ; faux doublon → `requestId` monotone.
-- **Exclusions** : SQLite dans le worker, LLM, événements Phase 5, compression des résultats.
+- **Périmètre global** : second worker, protocole versionné `protocolVersion = 1`, corrélation par `requestId`, validation complète dans le main, verrou monde étendu, annulation à la suppression, Golden Hash préservé. Aucune transaction dans le worker, aucun changement de schéma SQLite, aucun canal IPC ni changement UI.
+- **Règle de production** : aucun mode hybride. Jusqu'à 3D-C3, le calcul direct Phase 3C reste le chemin de production ; le worker livré en 3D-C2 n'est pas branché. Après intégration, le calcul direct restera comme référence de test uniquement, jamais comme repli en production.
+- **Découpage validé** :
+
+| Sous-tranche | Contenu | Critère d'acceptation |
+|---|---|---|
+| **3D-C1 — Fondations contractuelles** | `src/shared/worker-protocol.ts` (nouveau) avec `ComputeTickRequest`, `ComputeTickResponse`, versions et validateurs purs ; extraction de `canonicalize()`, `collectRuleIds()` et de la sérialisation du noyau Golden Hash dans un module partagé sans Node, avec réexports depuis `decision-record.service.ts` ; extraction de `tick-writer.service.ts` derrière la façade inchangée, encore appelé **synchrone** par `stepSimulation()`. | Protocole validé (versions, champs, erreurs) ; un seul canonicaliseur de production et un seul noyau Golden Hash partagés ; 18 Golden Hash inchangés ; façade et hooks `_...ForTests` inchangés ; aucun fichier IPC/UI/schéma modifié. |
+| **3D-C2 — Worker non branché** | `src/main/simulation/tick-compute.worker.ts` (nouveau), résolution du chemin du second worker, harnais `worker_threads` avec point d'injection contrôlé, réponses `result`/`error`, checksum sur le noyau Golden Hash. La production utilise toujours le calcul direct. | Messages valides/invalides et versions inconnues rejetés ; entrée identique → sortie identique ; aucun état résiduel entre requêtes ; checksum identique côté main et aux 18 hashes ; aucun SQLite, IPC ni fichier ouvert par le worker. |
+| **3D-C3 — Intégration et verrous** | `pendingComputes`, compteur `requestId`, timeout fixe 30 s, doublons/tardifs ignorés, gestion `error`/`exit`, recréation paresseuse, marqueur `origin: 'auto' \| 'manual'`, annulation immédiate à la suppression, scission de `stepSimulation()` en snapshot sous global / attente sous verrou monde / reprise globale avec `expected`, `before`, transaction courte et persistance. | Aucune écriture concurrente du même monde ; aucun tick partiel ; suppression pendant calcul sans écriture tardive ; timeout et crash rejettent l'IPC manuelle sans laisser `ipcMain.handle` sans réponse ; erreur automatique sans écriture ni changement de statut ; relecture d'horloge et restauration 3D-B intactes. |
+| **3D-C4 — Documentation et validation finale** | Mise à jour des documents concernés, puis séquence complète : check-deps → typecheck 4 configs → tests ciblés → suite complète → test long isolé → build → revue du diff. | 18 Golden Hash ordinaires verts et matrice complète en test long isolé ; suite complète verte ; build OK ; aucun secret ni fichier généré versionné ; commit et push sans force. |
+
+- **Statut des sous-tranches (2026-11-26)** : 3D-C1 **livrée**, 3D-C2 **livrée** (worker non branché), 3D-C3 et 3D-C4 **non commencées**. En 3D-C2, la résolution du chemin du worker et le harnais `worker_threads` restent volontairement côté tests : le point d'injection production n'arrive qu'avec 3D-C3, afin d'éviter tout branchement ou repli implicite anticipé.
+- **Validation** : 3D-C3 nécessite une validation explicite distincte ; les sous-tranches suivantes seront proposées une par une, sans démarrage anticipé.
+- **Exclusions globales** : SQLite dans le worker, LLM, événements Phase 5, compression des résultats, optimisation opportuniste de la persistance.
 
 ### 4.4 Tranche 3D-D — IPC et interface minimale
 
@@ -191,11 +216,11 @@ Une politique de purge calculée sur un nombre de ticks reste une question ouver
 ### 5.6 Erreurs et redémarrage du worker
 
 - Chaque requête possède un `requestId` monotone local au manager ; aucun UUID n'est nécessaire et aucun aléa n'entre dans la simulation.
-- Une table `pendingComputes` corrèle requêtes et réponses.
-- Délai d'attente configurable, valeur initiale proposée : **30 s**.
+- Une table `pendingComputes` corrèle requêtes et réponses ; l'entrée est **retirée avant le rejet** sur timeout, `error`, `exit` ou annulation.
+- Délai d'attente **fixe de 30 s** (arbitrage P8) : aucune surface de configuration n'est ajoutée. Les timeouts du verrou du monde et de la file d'écriture restent indépendants, à 30 s.
 - Réponse tardive, doublon ou `worldId`/`tick` inattendu : ignorée après journalisation, jamais persistée.
-- `worker.on('exit')` rejette toutes les requêtes en attente ; aucun tick n'est rejoué automatiquement. Le worker de calcul est recréé automatiquement au prochain signal de tick ou à la prochaine commande active qui en a besoin (`step` manuel) ; un simple `simulationGetStatus()` ne le recrée pas.
-- Erreur de calcul sur `step` manuel : rejet de l'appel IPC. Sur tick automatique : journalisation dans le main, aucun état écrit, statut diffusé inchangé. Aucun retry automatique.
+- `worker.on('error')` et `worker.on('exit')` rejettent toutes les requêtes en attente et vident la map ; aucun tick n'est rejoué automatiquement. Le worker de calcul est recréé automatiquement au prochain signal de tick ou à la prochaine commande active qui en a besoin (`step` manuel) ; un simple `simulationGetStatus()` ne le recrée pas (arbitrage P7).
+- Erreur de calcul sur `step` manuel : rejet de l'appel IPC. Sur tick automatique : journalisation dans le main, aucun état écrit, statut inchangé en valeur, aucun retry automatique (arbitrage P6).
 - Les horodatages de diagnostic ne sont jamais utilisés comme entrée des règles ni comme clé de requête.
 
 ### 5.7 Verrous et suppression concurrente
@@ -207,16 +232,18 @@ Deux verrous distincts sont nécessaires :
 
 L'ordre est toujours **monde → global** quand les deux sont nécessaires. Le verrou global n'est **pas** détenu pendant `await compute-tick` : il bloquerait les écritures des autres mondes pendant jusqu'à 30 s. Le tick le reprend après le calcul pour relire l'horloge, valider l'absence de changement, exporter `beforeBuffer`, écrire et persister. Le verrou du monde garantit qu'aucune opération du même monde ne modifie la base pendant le calcul.
 
-Toute opération qui peut écrire un monde — y compris `getWorld()` (`last_opened_at`) et le CRUD personnage — doit prendre le verrou du monde avant le verrou global. Les opérations purement globales, comme la récupération des horloges au démarrage, prennent seulement le verrou global.
+Toute opération qui peut écrire un monde — y compris `getWorld()` (`last_opened_at`), le CRUD personnage et l'instanciation de modèle via leurs handlers IPC — doit prendre le verrou du monde avant le verrou global (arbitrage P1). **Aucune écriture ciblant un monde ne peut intervenir pendant le calcul d'un tick de ce même monde.** Les opérations purement globales, comme la récupération des horloges au démarrage, prennent seulement le verrou global.
 
-La suppression d'un monde doit être séquencée dans cet ordre :
+La suppression d'un monde doit être séquencée dans cet ordre (arbitrage P5) :
 
-1. prendre le verrou du monde, ce qui attend la fin du tick en cours et empêche tout nouveau tick ;
-2. arrêter la planification et annuler les `pendingComputes` de ce monde ; aucune réponse tardive ne pourra écrire ;
-3. prendre le verrou global d'écriture ;
-4. supprimer les lignes SQLite et persister la base dans la même section verrouillée ;
-5. nettoyer `activeTickWorlds` et la map des verrous ;
-6. relâcher le verrou global puis le verrou du monde.
+1. **dès l'appel `simulationDeleteWorld()`, avant toute attente de verrou** : poser le tombeau `deletedWorldIds` et annuler les `pendingComputes` du monde (retrait des entrées puis rejet des promesses) ;
+2. prendre le verrou du monde, ce qui attend la fin du tick en cours et empêche tout nouveau tick ;
+3. arrêter la planification du monde et nettoyer `activeTickWorlds` ;
+4. prendre le verrou global d'écriture ;
+5. supprimer les lignes SQLite et persister la base dans la même section verrouillée ;
+6. nettoyer la map des verrous, puis relâcher le verrou global puis le verrou du monde.
+
+Aucune réponse tardive, y compris après timeout, ne peut valider un tick : le tombeau et l'absence d'entrée dans `pendingComputes` sont contrôlés avant validation et avant `BEGIN`. L'annulation ne dépend pas de l'acquisition du verrou monde, ce qui évite qu'un timeout laisse un calcul encore pending.
 
 Le nettoyage actuel de `worldLocks` est incorrect : la map stocke `previous.then(() => current)` alors que le `finally` compare `current`. Il faut stocker la promesse chaînée réellement comparée, par exemple `const chained = previous.then(() => current); worldLocks.set(worldId, chained); … if (worldLocks.get(worldId) === chained) worldLocks.delete(worldId);`.
 
@@ -271,7 +298,7 @@ Deux canaux de lecture suffisent : un résumé d'historique filtrable et un enre
 - Compatibilité additive des anciennes sauvegardes.
 - Aucun accès SQLite ou Node depuis le renderer.
 - Aucun réseau ni LLM dans le moteur de décision.
-- Golden Hash : comparer ancien calcul direct et nouveau calcul worker sur plusieurs seeds, profils (6 profils existants), effectifs 1/2/10/50, et horizons 24/72/168/720 ticks.
+- Golden Hash : comparer ancien calcul direct et nouveau calcul worker sur plusieurs seeds, profils (6 profils existants), effectifs 1/2/10/50 et horizons 24/72/168/720 ticks. Les **18 scénarios historiques restent dans la suite ordinaire** ; la matrice complète est exécutée dans le **test long isolé**. Le checksum du protocole utilise le même noyau, qui exclut `decisionRecords` (arbitrage P2).
 
 ## 7. Croissance estimée du stockage
 
@@ -300,7 +327,9 @@ La charge utile canonique réelle (~38–42 Ko) est supérieure à l'hypothèse 
 | Risque | Prévention |
 |---|---|
 | Divergence déterministe lors du passage au worker | Golden Hash, contrat de calcul unique, aucun hybride, validation stricte des entrées. |
-| Chevauchement d'écritures pendant l'attente worker | Verrou monde maintenu pendant tout le tick, verrou global limité aux accès SQLite, relecture de l'horloge avant écriture, corrections de `worldLocks`. |
+| Chevauchement d'écritures pendant l'attente worker | Verrou monde étendu à toute écriture IPC ciblant un monde, verrou global limité aux accès SQLite, relecture de l'horloge avant écriture, `worldLocks` corrigé. |
+| Deux canonicaliseurs / trois notions de hash | Un seul noyau Golden Hash partagé pour le checksum, `payloadSha256` réservé à l'historique, réexports de la façade conservés. |
+| Réponse tardive après suppression | Tombeau et annulation avant verrous, `pendingComputes` retiré avant rejet, contrôle avant `BEGIN`. |
 | Échec de disque après `COMMIT` | Export initial conservé, restauration de la base mémoire, erreur remontée sans réparation tacite. |
 | Corruption d'une explication | Version, hash, bornes de taille, parse strict, erreur technique. |
 | Croissance SQLite rapide | Compression, index, fenêtre UI, mesure à 10/50/100 personnages, décision de rétention explicite. |
@@ -320,10 +349,18 @@ La principale erreur serait de faire marcher le worker et la persistance en para
 
 1. **Rétention** : aucune purge automatique en 3D. Les mesures de 3D-A restent utiles pour une décision produit ultérieure, mais aucune suppression automatique n'est introduite.
 2. **Archivage/export** : aucun système d'export ou d'archivage dans 3D-A ; le format éventuel d'un export manuel reste une décision séparée.
-3. **Timeout worker** : **30 s** retenus pour la future 3D-C, sans implémentation dans 3D-A.
+3. **Timeout worker** : **30 s**, valeur fixe retenue pour 3D-C, sans surface de configuration ni implémentation dans 3D-A/3D-B.
 4. **Identifiant de moteur** : `engineVersion = 'phase3d.1'` est la valeur initiale. Stratégie de versionnement : incrémenter le segment mineur (`phase3d.2`, …) pour tout changement de forme du payload ou de sémantique des champs ; un changement de règles de calcul qui modifie le contenu sans changer la forme conserve la version mais doit être couvert par un nouveau Golden Hash ; toute nouvelle version doit être ajoutée à la liste des versions acceptées par le lecteur, sans réécriture des anciens enregistrements.
+5. **Verrouillage des écritures (P1)** : verrou du monde sur toute opération IPC modifiant un monde, ses personnages ou ses instances ; ordre monde → global ; aucune écriture du même monde pendant le calcul d'un tick.
+6. **Checksum (P2)** : définition historique du noyau Golden Hash, sans `decisionRecords`, utilisée par le protocole worker ; les 18 hashes restent la référence de la suite ordinaire.
+7. **Canonicaliseur (P3)** : extraction en module partagé pur, sans Node ; `decision-record.service.ts` conserve ses exports.
+8. **Suppression (P5)** : tombeau et annulation des calculs `pending` immédiats, avant l'attente des verrous.
+9. **Origine du tick (P6)** : marqueur interne `origin: 'auto' | 'manual'`, sans nouveau canal IPC ; step manuel rejette l'IPC, tick automatique journalise sans écriture ni changement de statut.
+10. **Workers (P7)** : séparation stricte planificateur/calculateur ; `simulationGetStatus()` ne recrée jamais le worker de calcul.
+11. **Timeout et concurrence (P8)** : constante 30 s ; entrée `pending` retirée avant rejet ; doublons et réponses tardives ignorés ; aucun retry automatique.
+12. **Golden Hash** : 18 scénarios historiques en suite ordinaire ; matrice complète 6 profils × 1/2/10/50 personnages × 24/72/168/720 ticks en test long isolé.
 
-Aucune de ces décisions n'autorise un appel réseau, une modification de l'UI ou un déplacement du calcul hors du main dans 3D-A.
+Aucune de ces décisions n'autorise un appel réseau, une modification de l'UI, un changement de schéma SQLite, un benchmark ou un déplacement du calcul hors du main avant la validation explicite de 3D-C3. 3D-C1 et 3D-C2 ont respecté cette limite : le worker existe mais n'est pas branché.
 
 ## 11. Références
 

@@ -2,61 +2,12 @@
  * Golden Hash 3D-A : le calcul Phase 3C doit rester byte-identique après
  * l'ajout de l'historique. Les hashes ci-dessous ont été mesurés sur le code
  * Phase 3C livré, avant toute modification de 3D-A.
+ *
+ * La sérialisation du noyau provient désormais du module partagé pur
+ * `src/shared/canonicalization.ts` : aucune valeur de référence n'est modifiée.
  */
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { computeCharacterTick } from '../src/main/services/character-tick.service';
-import { validateDecisionRecordPayload } from '../src/main/services/decision-record.service';
-import { DEFAULT_SIMULATION_PARAMETERS } from '../src/main/services/simulation-parameters.service';
-import type { CharacterActionRuntime } from '../src/shared/action';
-import type { CharacterEmotions, CharacterNeeds } from '../src/shared/character';
-import type { CharacterTickInput, CharacterTickSnapshot } from '../src/shared/simulation-rules';
-import { makeSnapshot, PROFILES } from './simulation-rules-fixtures';
-
-/** Même canonicaliseur que celui utilisé pour la mesure de référence. */
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(',')}}`;
-}
-
-function scenarioHash(profile: string, count: number, ticks: number): string {
-  let snapshots: CharacterTickSnapshot[] = Array.from({ length: count }, (_, index) => makeSnapshot({
-    characterId: `c-${String(index).padStart(3, '0')}`,
-    traits: { ...PROFILES[profile] },
-  }));
-  let rngState = 0x12345678;
-  const runtimes = new Map<string, CharacterActionRuntime>();
-  let last = computeCharacterTick({
-    worldId: 'golden', tick: 0, day: 1, hour: 0, seed: 0xc0ffee, rngState,
-    characters: snapshots, params: DEFAULT_SIMULATION_PARAMETERS,
-  });
-  for (let tick = 1; tick <= ticks; tick += 1) {
-    const input: CharacterTickInput = {
-      worldId: 'golden', tick, day: Math.floor(tick / 24) + 1, hour: tick % 24,
-      seed: 0xc0ffee, rngState, characters: snapshots, params: DEFAULT_SIMULATION_PARAMETERS,
-      actionRuntimeByCharacter: Object.fromEntries(runtimes),
-    };
-    last = computeCharacterTick(input);
-    // Chaque enregistrement généré sur une longue simulation doit satisfaire
-    // la validation stricte utilisée à l'écriture et à la lecture.
-    for (const record of last.decisionRecords) validateDecisionRecordPayload(record);
-    rngState = last.rngState;
-    snapshots = last.characterStates.map((state, index) => ({
-      ...snapshots[index],
-      needs: state.needs as CharacterNeeds,
-      emotions: state.emotions as CharacterEmotions,
-    }));
-    for (const runtime of last.actionRuntimeStates) runtimes.set(runtime.characterId, runtime.runtime);
-  }
-  const core = {
-    worldId: last.worldId, tick: last.tick, rngState: last.rngState,
-    characterStates: last.characterStates, deltas: last.deltas, decisions: last.decisions,
-    actionDeltas: last.actionDeltas, actionRuntimeStates: last.actionRuntimeStates, warnings: last.warnings,
-  };
-  return createHash('sha256').update(canonical(core), 'utf8').digest('hex');
-}
+import { computeGoldenScenarioHash } from './worker-tick-fixtures';
 
 const EXPECTED: Record<string, string> = {
   'optimiste résilient|1|720': 'd04aaa45719768fa4733c0450a8ba96e901583ef5bd26bfe8edc0dc18ad9ed30',
@@ -83,7 +34,7 @@ describe('Golden Hash — non-régression Phase 3C après 3D-A', () => {
   for (const [key, expected] of Object.entries(EXPECTED)) {
     const [profile, count, ticks] = key.split('|');
     it(`${profile} — ${count} personnage(s), ${ticks} ticks`, () => {
-      expect(scenarioHash(profile, Number(count), Number(ticks))).toBe(expected);
+      expect(computeGoldenScenarioHash(profile, Number(count), Number(ticks))).toBe(expected);
     }, 120_000);
   }
 });

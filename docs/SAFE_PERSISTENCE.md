@@ -16,7 +16,10 @@ après `COMMIT`. Trois défauts étaient vérifiés dans le code :
    que le disque conservait l'état précédent.
 
 La tranche 3D-B couvre la persistance, la restauration mémoire, les verrous et la
-suppression concurrente. Le calcul reste dans le main (3D-C non commencée).
+suppression concurrente. Le calcul reste dans le main. Les tranches 3D-C1 et 3D-C2
+ont ajouté le protocole partagé et un worker de calcul autonome, mais celui-ci
+reste non branché : aucune écriture SQLite ni aucun `await` de calcul n'a été
+déplacé hors du main.
 
 ## 2. Séquence réelle d'un tick
 
@@ -46,6 +49,31 @@ calcul deviendra asynchrone : le verrou global sera relâché pendant l'attente 
 worker, puis repris pour relire l'horloge et exporter `before` juste avant
 `BEGIN`. Un export pris avant une attente asynchrone écraserait les écritures
 d'autres mondes survenues pendant cette attente.
+
+Séquence d'intégration 3D-C3 prévue (non implémentée) :
+
+```text
+withWorldLock(worldId)                 // couvre tout le tick et toute écriture du monde
+  withDbWrite                          // section courte
+    valider monde + horloge, lire snapshot/runtimes/PRNG
+  fin withDbWrite                      // verrou global relâché pendant l'attente worker
+  await compute-tick                   // verrou monde seul, timeout fixe 30 s
+  withDbWrite                          // verrou global repris
+    relire horloge + valider expected + tombeau
+    before = snapshotDatabaseFromDisk() // après la reprise, avant BEGIN
+    BEGIN TRANSACTION
+    écrire états, runtime, historique, horloge, statut
+    COMMIT
+    after = db.export()
+    atomicPersist(after)
+    si échec avant rename : restoreDatabaseFromBuffer(before)
+  fin withDbWrite
+  syncWorkerForStatus + broadcast       // uniquement si le tick a réussi
+fin withWorldLock
+```
+
+Pendant l'attente du worker, un autre monde peut écrire ; aucun monde cible ne peut
+être modifié, puisque le verrou du monde reste détenu (arbitrage P1).
 
 `before` est fourni par `snapshotDatabaseFromDisk()`, qui retourne une copie du
 dernier tampon validé par `atomicPersist`. Le verrou global garantit que ce tampon
@@ -108,6 +136,13 @@ personnage, bibliothèque de modèles, `getWorld()` (qui écrit `last_opened_at`
 commandes de simulation, tick, helpers de test et suppression. Les lectures pures
 restent hors verrou.
 
+En 3D-C, toute opération IPC qui modifie un monde, ses personnages ou ses
+instances prendra également le **verrou du monde avant le verrou global**
+(arbitrage P1). Cela couvre `WORLD_GET` (écriture de `last_opened_at`), les
+handlers `CHARACTER_CREATE/UPDATE/DELETE` et `TEMPLATE_INSTANTIATE`. Aucune
+écriture ciblant un monde ne peut intervenir pendant le calcul d'un tick de ce
+même monde.
+
 ### 5.2 Verrou par monde
 
 Le manager corrige le nettoyage de `worldLocks` : la map stocke désormais la
@@ -119,21 +154,30 @@ grâce au tombeau `deletedWorldIds`.
 
 ### 5.3 Suppression concurrente d'un monde
 
-`WORLD_DELETE` appelle désormais `simulationDeleteWorld(id)`, jamais
-`deleteWorld()` directement. Séquence :
+`WORLD_DELETE` appelle `simulationDeleteWorld(id)`, jamais `deleteWorld()`
+directement.
 
-1. prendre le verrou du monde (attend la fin du tick en cours) ;
-2. poser le tombeau et envoyer `stop` au planificateur ;
-3. nettoyer `activeTickWorlds` ;
-4. prendre le verrou global via `deleteWorld()`, supprimer les lignes et
-   persister atomiquement ;
-5. relâcher les verrous dans l'ordre inverse.
+**3D-B (implémenté)** : prendre le verrou du monde, poser le tombeau et envoyer
+`stop` au planificateur, nettoyer `activeTickWorlds`, prendre le verrou global,
+supprimer et persister atomiquement, puis relâcher les verrous en ordre inverse.
+Il n'existe pas encore de calcul asynchrone ni de `pendingComputes` : le tombeau
+suffit à invalider les signaux déjà en file.
 
-En 3D-B il n'existe pas encore de calcul asynchrone ni de `pendingComputes` : le
-tombeau suffit à invalider les signaux déjà en file. La tranche 3D-C devra ajouter
-l'annulation explicite des requêtes en attente avant de relâcher le verrou du
-monde. Le service interne `deleteWorld()` reste disponible mais n'est plus appelé
-par l'IPC.
+**3D-C3 (prévu, arbitrage P5)** : dès l'appel, **avant toute attente de verrous** :
+
+1. poser le tombeau `deletedWorldIds` ;
+2. annuler les `pendingComputes` du monde : retirer les entrées de la map puis
+   rejeter les promesses ;
+3. prendre le verrou du monde, envoyer `stop`, nettoyer `activeTickWorlds` ;
+4. prendre le verrou global via `deleteWorld()`, supprimer les lignes et persister
+   atomiquement ;
+5. relâcher le verrou global puis le verrou du monde.
+
+Aucune réponse tardive, y compris après timeout, ne peut écrire : le contrôle
+tombeau + absence d'entrée dans `pendingComputes` est effectué avant validation
+et avant `BEGIN`. L'annulation ne dépend pas de l'acquisition du verrou monde, ce
+qui évite qu'un timeout de 30 s laisse un calcul encore pending. Le service
+interne `deleteWorld()` reste disponible mais n'est plus appelé par l'IPC.
 
 ## 6. Plateformes
 
@@ -212,4 +256,5 @@ optimisations (hash en flux, persistance groupée, rétention) restent ouverts.
 
 WAL natif, better-sqlite3, sauvegarde automatique périodique, export/import par
 monde, compression générale de la base, chiffrement, déplacement de SQLite dans
-un worker, annulation de `pendingComputes` (3D-C).
+un worker. L'annulation de `pendingComputes` est hors périmètre de **3D-B** et
+prévue en **3D-C3** (arbitrage P5).

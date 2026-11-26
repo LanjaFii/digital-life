@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3D-B — persistance atomique et verrous implémentée** ; Phase 3C reste la dernière tranche complète avant 3D. 3D-C et 3D-D restent à implémenter.
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A/3B/3C implémentées/validées/committées/poussées ; Phase 3D conçue et documentée, **tranches 3D-A (historique) et 3D-B (persistance/verrous) implémentées/validées**. Worker (3D-C), IPC/UI (3D-D) non implémentés. `forkFromStopped` reste `[Reporté]`.
-- **Dernière mise à jour** : 2026-11-25.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant implémentation 3D-B : `a64d483d46984eeef859cf40cec674575b9ec36c`, identique à `origin/main`, arbre propre.
+- **Phase** : **Phase 3D-C1 et 3D-C2 implémentées et validées** (fondations contractuelles et worker de calcul non branché) ; l'intégration 3D-C3 et l'IPC/UI 3D-D restent à implémenter.
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A/3B/3C implémentées/validées/committées/poussées ; Phase 3D conçue et documentée, **tranches 3D-A, 3D-B, 3D-C1 et 3D-C2 implémentées/validées**. Intégration du worker (3D-C3), documentation finale 3D-C4 et IPC/UI (3D-D) non implémentés ; **3D-C3 attend une validation explicite distincte**. `forkFromStopped` reste `[Reporté]`.
+- **Dernière mise à jour** : 2026-11-26.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant implémentation 3D-C1/C2 : `d900ecd908aac01c10c947d8abd1e4d758f2a235`, identique à `origin/main` au début de la tranche ; le commit de livraison est décrit dans `CHANGELOG.md`.
 
 ## Fonctionnalités terminées
 
@@ -153,13 +153,26 @@
 - [x] Tests : 21 nouveaux tests (13 persistance atomique et panne, 3 file globale, 5 manager) ; validation globale **264/264** (27 fichiers, benchmark et test long exclus) ; test long isolé **9/9** en 6,00 s ; typecheck 4 configurations OK ; build de production OK.
 - [x] Documentation mise à jour : `SAFE_PERSISTENCE.md`, `WORLD_STORE_REFACTORING.md`, `DATABASE.md`, `PHASE_3D_DESIGN.md`, `DECISION_HISTORY_SYSTEM.md`, `ARCHITECTURE.md`, `SIMULATION_ENGINE.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
 
+## Implémentation Phase 3D-C1 et 3D-C2 (terminée dans cette tranche)
+
+- [x] Audit préalable : HEAD local = `origin/main` = `d900ecd`, arbres et documents relus, aucun changement de schéma, IPC, UI, PRNG ni Golden Hash.
+- [x] `src/shared/worker-protocol.ts` : `WORKER_PROTOCOL_VERSION = 1`, `ComputeTickRequest`/`ComputeTickResultResponse`/`ComputeTickErrorResponse`/`ComputeWorkerReadyMessage`, validateurs stricts, `WorkerProtocolError`, codes `invalid_input`/`compute_error`/`unsupported_version`, erreurs corrélées ou non.
+- [x] `src/shared/canonicalization.ts` : `canonicalize()` stricte pour l'intégrité des Decision Records et `canonicalizeGoldenTickResult()` (historique) isolées ; `collectRuleIds()` déplacé sans changement de comportement. 18 références inchangées.
+- [x] `src/shared/decision-validation.ts` et `src/main/services/decision-record.service.ts` : validation partagée extraite, réexports conservés (`canonicalize`, `collectRuleIds`, limites, `validateDecisionRecordPayload`) ; versions `ACTION_REGISTRY_VERSION`, `SIMULATION_PARAMETERS_VERSION` et causes de deltas centralisées.
+- [x] `src/main/services/tick-writer.service.ts` : préparation des états, contrôle de cohérence de l'historique, écritures états/historique/horloge/statut extraites de `stepSimulation()` ; transaction, ordre d'écriture, façade et hooks de test inchangés. Le calcul reste synchrone dans le main.
+- [x] `src/main/simulation/tick-compute.worker.ts` : worker `worker_threads` autonome, `ready`, validation de la requête, calcul pur, checksum SHA-256 du noyau Golden Hash, réponse validée avant envoi, erreurs corrélées, aucun état résiduel. **Aucun branchement production** : ni manager, ni IPC, ni UI, ni repli synchrone silencieux.
+- [x] Tests ciblés : protocole (8), tick-writer (4), parité worker/synchrone (3), 18 Golden Hash ordinaires ; matrice étendue 96 scénarios (6 profils × 1/2/10/50 × 24/72/168/720) figée et vérifiée en test long isolé.
+- [x] Validations : typecheck 4 configurations OK, suite complète **279/279** (30 fichiers, benchmark et tests longs exclus), matrice longue **96/96**, build de production OK (check-deps inclus). Aucune modification de données utilisateur.
+
 ## Fonctionnalités non commencées
 
 - [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
 - [x] ~~Phase 3C : intégration des services au tick, persistance du runtime, tests SQLite et simulations longues~~ — **terminée (tranche 3)**.
 - [x] ~~Tranche 3D-A : historique technique des décisions~~ — **terminée et validée**.
 - [x] ~~Tranche 3D-B : persistance atomique, restauration mémoire et verrous~~ — **terminée et validée cette tranche**.
-- [ ] Phase 3D : tranches 3D-C (worker de calcul) et 3D-D (IPC/UI) — **conçues, en attente de validation explicite distincte pour chacune**.
+- [x] ~~Tranche 3D-C1 : fondations contractuelles (protocole, canonicalisation partagée, frontière d'écriture)~~ — **terminée et validée cette tranche**.
+- [x] ~~Tranche 3D-C2 : worker de calcul non branché et parité Golden Hash~~ — **terminée et validée cette tranche**.
+- [ ] Phase 3D : tranches 3D-C3 (intégration/verrous), 3D-C4 (documentation finale) et 3D-D (IPC/UI) — **conçues, en attente de validation explicite distincte pour chacune** ; 3D-C3 est la prochaine sous-tranche à valider.
 - [ ] Phase 3C complémentaire : `forkFromStopped`, hystérésis des objectifs, actions Tier B avec environnement (tous `[Reporté]`).
 - [ ] Phases 4 à 8 : relations, événements canoniques, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
@@ -277,6 +290,20 @@ Ajouts tranche implémentation Phase 3D-B :
 - `tests/simulation-manager-lock.test.ts`
 - `tests/zz-benchmark.tmp.test.ts` (outil local temporaire, exclu des validations et ignoré par Git, jamais lancé pendant la validation finale)
 
+Ajouts tranche implémentation Phase 3D-C1/C2 :
+- `src/shared/worker-protocol.ts`, `src/shared/canonicalization.ts`, `src/shared/decision-validation.ts`
+- `src/main/services/tick-writer.service.ts`, `src/main/simulation/tick-compute.worker.ts`
+- `tests/worker-tick-protocol.test.ts`, `tests/tick-writer.test.ts`, `tests/worker-tick-parity.test.ts`,
+  `tests/worker-tick-golden-matrix.long.test.ts`, `tests/worker-tick-fixtures.ts`
+
+Documentation arbitrages Phase 3D-C (mission documentaire du 2026-11-26) :
+- aucun fichier créé ; aucun code, test, benchmark, commit ni push
+- fichiers modifiés : `docs/PHASE_3D_DESIGN.md`, `docs/WORKER_TICK_PROTOCOL.md`,
+  `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`,
+  `docs/DECISION_HISTORY_SYSTEM.md`, `docs/CHARACTER_STATE_ARCHITECTURE.md`,
+  `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/ARCHITECTURE.md`, `README.md`,
+  `HANDOFF.md`, `PROGRESS.md`, `CHANGELOG.md`
+
 Ajouts tranche implémentation Phase 3C — tranche 2 :
 - `src/main/services/goal-selection.service.ts`
 - `src/main/services/action-candidacy.service.ts`
@@ -312,8 +339,13 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - Tranche conception Phase 3D (documentaire) : `docs/DATABASE.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/EVENT_AND_MEMORY_SYSTEM.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`. Aucun fichier applicatif, schéma SQLite, migration, worker, IPC, preload, UI ni appel LLM modifié.
 - Tranche implémentation Phase 3D-A : `src/shared/action.ts`, `src/shared/decision.ts`, `src/shared/simulation-rules.ts`, `src/main/services/action-runtime.service.ts`, `src/main/services/character-tick.service.ts`, `src/main/services/world-store.service.ts`, `tests/simulation.test.ts` (timeout documenté du test long), `docs/DECISION_HISTORY_SYSTEM.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DATABASE.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
 - Tranche implémentation Phase 3D-B : `src/main/ipc/world.ipc.ts`, `src/main/services/simulation-manager.service.ts`, `src/main/services/world-store.service.ts`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DATABASE.md`, `docs/PHASE_3D_DESIGN.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/AUTONOMOUS_DECISION_SYSTEM.md`, `docs/CHARACTER_TICK_RULES.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `.gitignore` (benchmark local ignoré sans suppression).
+- Arbitrages Phase 3D-C (mission documentaire du 2026-11-26) : `docs/PHASE_3D_DESIGN.md`, `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/ARCHITECTURE.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`. Aucun fichier applicatif, test, schéma, canal IPC, worker, benchmark ni donnée utilisateur modifié.
+- Tranche implémentation Phase 3D-C1/C2 : `src/shared/action.ts`, `src/shared/simulation-rules.ts`, `src/main/services/action-registry.service.ts`, `src/main/services/simulation-parameters.service.ts`, `src/main/services/character-tick.service.ts`, `src/main/services/decision-record.service.ts`, `src/main/services/world-store.service.ts`, `tests/decision-golden-hash.test.ts`, plus les documents de suivi et techniques concernés.
 
 ## Tests réussis
+
+> Dernière vérification complète : tranche 3D-C1/C2 (2026-11-26). Les validations ont été
+> exécutées séquentiellement, sans benchmark ni test long de simulation superflus.
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : **OK** (4 tsconfigs).
@@ -329,6 +361,8 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - **Validation tranche conception Phase 3D (documentaire)** : check-deps OK, typecheck 4 configs OK, tests **215/215 passés** (22 fichiers), build OK. Vérification croisée : 6 nouveaux documents, 4 documents techniques mis à jour, audit indépendant intégré, liens Markdown locaux valides, `git diff --check` OK, aucun fichier applicatif modifié.
 - **Validation tranche implémentation Phase 3D-A** : check-deps OK, typecheck 4 configs OK, tests **252/252 passés** (25 fichiers : 215 existants + 37 nouveaux), build OK. Tests ciblés 37/37 (10 sérialisation, 9 SQLite, 18 Golden Hash). Vérification migration legacy (`schema_migrations` `3D-1`, colonnes et index présents dans le fichier persisté), rollback sans orphelin, conservation après suppression d'instance, cascade monde, doublons rejetés, tailles BLOB mesurées à 10/50/100 personnages. Golden Hash 18 scénarios inchangé. Aucun secret ni fichier généré ajouté, aucun canal IPC/preload/renderer/worker modifié.
 - **Validation tranche implémentation Phase 3D-B** : sauvegarde externe 22/22 fichiers vérifiée avant toute validation ; check-deps OK, typecheck 4 configs OK, tests **264/264 passés** (27 fichiers, benchmark et test long explicitement exclus), test long isolé **9/9** en 6,00 s, build de production OK (2 145 modules). Surveillance : RAM disponible minimale 7 587 MiB, swap 0, RSS max 259 232 KiB, charge max 1,80 pour la suite globale ; test long : RAM min 7 836 MiB, swap 0, RSS max 262 072 KiB, charge max 1,44 ; build : RAM min 7 767 MiB, swap 0, RSS max 255 648 KiB, charge max 0,77. Aucun seuil d'arrêt franchi, aucun processus résiduel. Pannes injectées : fsync refusé, hash altéré, `rename` `EPERM` simulé, échec après rename, restauration mémoire/disque octet pour octet, sérialisation deux mondes, file libérée après erreur et timeout, suppression pendant tick et suppressions concurrentes. `worlds.sqlite` utilisateur intact (24 576 octets, SHA-256 `562c36d1fc672bc47569eef56656a7dd32b5c11b13130ebff8ebad9bf4898182`). Benchmarks locaux non rejoués pendant la validation finale : 3 personnages 63,68 ms au tick 10 / 377,56 ms au tick 200 ; 10 personnages 548,45 ms ; 50 personnages 1 329,12 ms ; 100 personnages 1 652,77 ms ; 3×10 mondes 1 254,09 ms/tick. Aucune mesure 3D-A comparable à effectif égal : ces chiffres ne prouvent pas une amélioration.
+
+- **Validation tranche implémentation Phase 3D-C1/C2** : typecheck 4 configs OK ; ciblés 15/15 (protocole 8, tick-writer 4, parité 3) ; Golden Hash ordinaires **18/18** inchangés ; suite complète **279/279** (30 fichiers, benchmark et tests longs exclus, rejouée après mise à jour documentaire) ; matrice Golden Hash longue **96/96** en instance Vitest isolée (165,66 s) ; build de production OK avec check-deps intégré. Aucun test de benchmark ni simulation longue 3B rejoué : aucun changement de règle, de PRNG ni de persistance ; le harnais worker utilise le bundle `dist/main/simulation/tick-compute.worker.js` produit par ce build.
 
 ## Tests échoués
 
@@ -352,4 +386,4 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 
 ## Prochaine tâche précise
 
-La tranche **3D-B est terminée et validée**. Ne pas la recommencer. Attendre une validation explicite **distincte** avant de démarrer la tranche **3D-C** (worker de calcul dédié, protocole versionné, `pendingComputes`, Golden Hash, annulation des requêtes en attente avant de relâcher le verrou du monde). Ne pas toucher à l'IPC/UI (3D-D) sans validation dédiée. La limitation de performance documentée (`persist()` réexporte toute la base, coût croissant avec l'historique) reste ouverte : hash en flux, persistance groupée et rétention de l'historique ne sont pas implémentés. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.
+Les tranches **3D-A, 3D-B, 3D-C1 et 3D-C2 sont terminées et validées**. Ne pas les recommencer. Attendre une validation explicite **distincte** avant de démarrer **3D-C3** (intégration : `pendingComputes`, timeout 30 s, duplicate/tardifs, `origin: 'auto' | 'manual'`, scission de `stepSimulation()`, annulation des requêtes **dès l'appel de suppression, avant toute attente de verrou** (P5)), puis proposer 3D-C4 une par une. Le worker de calcul existe mais reste **non branché** : la production continue d'utiliser le calcul synchrone, sans repli silencieux. Ne pas toucher à l'IPC/UI (3D-D) sans validation dédiée. La limitation de performance documentée (`persist()` réexporte toute la base, coût croissant avec l'historique) reste ouverte : hash en flux, persistance groupée et rétention de l'historique ne sont pas implémentés. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.
