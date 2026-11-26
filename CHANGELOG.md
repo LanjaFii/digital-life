@@ -2,6 +2,17 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-26 — Règles de travail permanentes
+
+### Added
+- `AGENTS.md` : référence architecturale absolue (documents concernés, code réel, décisions antérieures, contradictions à signaler), discipline de développement par tranches cohérentes, séquence de validation/livraison en 12 étapes, conventions Git et principes d'autonomie/responsabilité.
+
+### Changed
+- `AGENTS.md` §9 : `AGENTS.md` ajouté aux documents à maintenir quand les règles changent ; obligation de documenter limites connues, décisions reportées et prochaines étapes recommandées.
+
+### Technical decisions
+- Aucun code fonctionnel ni aucune phase modifiée ; la Phase 3C reste en attente de validation explicite.
+
 ## 2026-11-25 — Phase 3D-B (persistance atomique et verrous)
 
 ### Added
