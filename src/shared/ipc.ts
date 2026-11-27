@@ -12,6 +12,8 @@ import type {
 } from './character';
 import type { CreateWorldInput, WorldListResult, WorldSummary } from './world';
 import type { SimulationSpeed, SimulationStatusView } from './simulation';
+import type { DecisionRecordV1 } from './decision';
+import type { DecisionHistoryQuery, DecisionSummaryView } from './decision-view';
 
 /**
  * Contrat IPC strict entre le renderer et le processus principal.
@@ -43,6 +45,8 @@ export const IPC_CHANNELS = {
   SIMULATION_SPEED: 'simulation:speed',
   SIMULATION_STOP: 'simulation:stop',
   SIMULATION_STATUS_CHANGED: 'simulation:status-changed',
+  DECISION_HISTORY: 'decision:history',
+  DECISION_RECORD: 'decision:record',
 } as const;
 
 export interface AppInfo {
@@ -90,5 +94,8 @@ export interface DigitalLifeApi {
   simulationStep(worldId: string): Promise<SimulationStatusView>;
   simulationSetSpeed(worldId: string, speed: SimulationSpeed): Promise<SimulationStatusView>;
   simulationStop(worldId: string): Promise<SimulationStatusView>;
+  /** Lectures seules de l'historique : aucun canal n'autorise de mutation. */
+  getDecisionHistory(query: DecisionHistoryQuery): Promise<DecisionSummaryView[]>;
+  getDecisionRecord(worldId: string, id: string): Promise<DecisionRecordV1>;
   onSimulationStatusChanged(callback: (status: SimulationStatusView) => void): () => void;
 }

@@ -2,10 +2,10 @@
 
 ## État actuel
 
-- **Phase** : **Phase 3D-C1 à 3D-C4 implémentées, validées, commitées et poussées** (protocole, worker de calcul branché, intégration manager/verrous, documentation finale) ; seule l'IPC/UI 3D-D reste à implémenter.
-- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A/3B/3C implémentées/validées/committées/poussées ; Phase 3D conçue et documentée, **tranches 3D-A, 3D-B et 3D-C1 à 3D-C4 implémentées/validées/committées/poussées**. L'IPC/UI (3D-D) n'est pas implémentée. `forkFromStopped` reste `[Reporté]`.
+- **Phase** : **Phase 3D complète (3D-A à 3D-D) implémentée, validée, commitée et poussée** ; la tranche 3D-D ajoute les deux canaux IPC de lecture et l'inspecteur React. Aucune phase suivante n'est démarrée.
+- **Avancement approximatif** : Phase 1 ~85 % (CRUD préparation) ; Phase 2 documentaire terminée ; Phase 3A/3B/3C implémentées/validées/committées/poussées ; **Phase 3D entièrement livrée** (historique, persistance atomique, verrous, worker, IPC lecture et UI). `forkFromStopped` reste `[Reporté]`.
 - **Dernière mise à jour** : 2026-11-27.
-- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant implémentation 3D-C1/C2 : `d900ecd908aac01c10c947d8abd1e4d758f2a235` ; HEAD avant intégration 3D-C3 : `c3a6232f70d830ca9adea311ee50377eb185b48d`, identique à `origin/main` au début de la tranche ; le commit de livraison 3D-C3/C4 est décrit dans `CHANGELOG.md`.
+- **Git** : remote `git@github.com:LanjaFii/digital-life.git`, branche `main`. HEAD avant implémentation 3D-C1/C2 : `d900ecd908aac01c10c947d8abd1e4d758f2a235` ; HEAD avant intégration 3D-C3 : `c3a6232f70d830ca9adea311ee50377eb185b48d` ; HEAD avant 3D-D : `b22dd73d6ccb2c2baed0447ae318209d9a651613`, identique à `origin/main` au début de la tranche ; le commit de livraison 3D-D est décrit dans `CHANGELOG.md`.
 
 ## Fonctionnalités terminées
 
@@ -175,6 +175,16 @@
 - [x] Documentation finale : `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `README.md`, `docs/PHASE_3D_DESIGN.md` (divergence `worldLocks` résolue), `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`.
 - [x] Validations séquentielles : check-deps OK, typecheck 4 configs OK, ciblés 57/57, Golden Hash ordinaires 18/18, suite complète **298/298** (32 fichiers), matrice longue **96/96**, simulation longue 3B **9/9**, build de production OK. Aucun benchmark lancé, aucun processus résiduel.
 
+## Implémentation Phase 3D-D (terminée dans cette tranche)
+
+- [x] Audit préalable : arbre Git propre, HEAD local = `origin/main` = `b22dd73d` ; lecture de `AGENTS.md`, `PROGRESS.md`, `HANDOFF.md`, `PHASE_3D_DESIGN.md`, `DECISION_HISTORY_SYSTEM.md`, `DECISION_INSPECTOR_UI.md` et du code réel. Huit arbitrages (D1 à D8) validés avant implémentation.
+- [x] Contrats partagés : `src/shared/decision-view.ts` (nouveau) avec `DecisionHistoryQuery`, `DecisionSummaryView`, constantes 50/500/1 000 000 et validateurs stricts ; `src/shared/ipc.ts` ajoute `DECISION_HISTORY`/`DECISION_RECORD` et les deux méthodes `DigitalLifeApi`, avec `worldId` obligatoire.
+- [x] Main : `decision.ipc.ts` (deux handlers lecture seule), `decision-read.service.ts` (façade et projection), `decision-history.store.ts` (tri `tick DESC, character_id ASC, id ASC`, `LIMIT/OFFSET`, `finally`, erreurs zlib normalisées, échec strict de la page), `decision-record.service.ts` (hash/cohérence), `main.ts` (enregistrement), `preload.ts` (exposition). Aucun verrou de mutation, aucune écriture, aucun changement de schéma.
+- [x] Renderer : `use-decision-history.ts` (throttle 500 ms, jeton, chargement/vide/erreur/réessai, détail à la demande), `DecisionPanel.tsx`, `DecisionDetail.tsx` (12 sections typées, badges fait/motivation/moteur, aucun JSON brut), `decision-labels.ts`, intégration `WorldView.tsx` (un seul abonnement au statut, `decisionTick` dérivé de `clock.tick`) et `CharacterDetail.tsx` (accès facultatif). Aucune mutation de simulation, aucun Recharts, aucune nouvelle page, bibliothèque inchangée.
+- [x] Tests : `decision-view.test.ts`, `decision-read.test.ts`, `decision-ipc.test.ts`, `decision-inspector-ui.test.tsx` (nouveaux) ; `world-resume-ui.test.tsx` (abonnement unique/tick identique), `phase0.test.ts` et trois mocks UI adaptés.
+- [x] Documentation : `PHASE_3D_DESIGN.md`, `DECISION_INSPECTOR_UI.md` (réécriture en état livré), `DECISION_HISTORY_SYSTEM.md`, `ARCHITECTURE.md`, `DATABASE.md`, `SIMULATION_ENGINE.md`, `WORLD_STORE_REFACTORING.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`.
+- [x] Validations séquentielles : check-deps OK, typecheck 4 configs OK, ciblés **63/63**, suite complète **335/335** (36 fichiers), Golden Hash **18/18** inchangés, build de production OK, `git diff --check` OK.
+
 ## Fonctionnalités non commencées
 
 - [x] ~~Implémentation Phase 3B : appliquer les règles conçues (besoins + émotions + influence personnalité) dans un tick atomique~~ — **terminée cette tranche**.
@@ -185,7 +195,7 @@
 - [x] ~~Tranche 3D-C2 : worker de calcul non branché et parité Golden Hash~~ — **terminée et validée**.
 - [x] ~~Tranche 3D-C3 : intégration du worker, verrous et annulation~~ — **terminée et validée cette tranche**.
 - [x] ~~Tranche 3D-C4 : documentation et validation finale~~ — **terminée et validée cette tranche**.
-- [ ] Phase 3D : tranche 3D-D (IPC/UI de lecture et inspecteur minimal) — **conçue, en attente de validation explicite distincte**.
+- [x] ~~Tranche 3D-D : IPC de lecture et inspecteur minimal~~ — **terminée, validée et livrée cette tranche**.
 - [ ] Phase 3C complémentaire : `forkFromStopped`, hystérésis des objectifs, actions Tier B avec environnement (tous `[Reporté]`).
 - [ ] Phases 4 à 8 : relations, événements canoniques, souvenirs, mort/deuil, LLM optionnel, interface avancée, stabilisation.
 
@@ -360,10 +370,11 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 - Arbitrages Phase 3D-C (mission documentaire du 2026-11-26) : `docs/PHASE_3D_DESIGN.md`, `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/CHARACTER_STATE_ARCHITECTURE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`, `docs/ARCHITECTURE.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`. Aucun fichier applicatif, test, schéma, canal IPC, worker, benchmark ni donnée utilisateur modifié.
 - Tranche implémentation Phase 3D-C1/C2 : `src/shared/action.ts`, `src/shared/simulation-rules.ts`, `src/main/services/action-registry.service.ts`, `src/main/services/simulation-parameters.service.ts`, `src/main/services/character-tick.service.ts`, `src/main/services/decision-record.service.ts`, `src/main/services/world-store.service.ts`, `tests/decision-golden-hash.test.ts`, plus les documents de suivi et techniques concernés.
 - Tranche implémentation Phase 3D-C3/C4 : `src/main/simulation/tick-compute.worker.ts` (commentaire de statut), `src/main/simulation/tick-compute-client.service.ts` (nouveau), `src/main/services/simulation-manager.service.ts`, `src/main/services/world-store.service.ts`, `src/main/ipc/world.ipc.ts`, `src/main/ipc/character.ipc.ts`, `tests/simulation-manager-lock.test.ts`, `tests/compute-worker-test-helpers.ts` (nouveau), `tests/tick-compute-client.test.ts` (nouveau), `tests/simulation-worker-integration.test.ts` (nouveau), plus les documents de suivi et techniques concernés.
+- Tranche implémentation Phase 3D-D : `src/shared/decision-view.ts`, `src/shared/ipc.ts`, `src/main/ipc/decision.ipc.ts`, `src/main/services/decision-read.service.ts`, `src/main/services/decision-history.store.ts`, `src/main/services/decision-record.service.ts`, `src/main/main.ts`, `src/preload/preload.ts`, `src/renderer/hooks/use-decision-history.ts`, `src/renderer/components/DecisionPanel.tsx`, `DecisionDetail.tsx`, `decision-labels.ts`, `WorldView.tsx`, `CharacterDetail.tsx`, `src/renderer/styles/global.css`, `tests/decision-view.test.ts`, `tests/decision-read.test.ts`, `tests/decision-ipc.test.ts`, `tests/decision-inspector-ui.test.tsx`, `tests/phase0.test.ts`, `tests/world-resume-ui.test.tsx`, `tests/character-library-ui.test.tsx`, `tests/character-deletion-ui.test.tsx`, documents techniques et de suivi. Aucun schéma SQLite, moteur, PRNG, worker ni LLM modifié.
 
 ## Tests réussis
 
-> Dernière vérification complète : tranche 3D-C3/C4 (2026-11-27). Les validations ont été
+> Dernière vérification complète : tranche 3D-D (2026-11-27). Les validations ont été
 > exécutées séquentiellement, sans benchmark ni scénario 50/100 personnages superflus.
 
 - `./.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : **OK**.
@@ -383,6 +394,7 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 
 - **Validation tranche implémentation Phase 3D-C1/C2** : typecheck 4 configs OK ; ciblés 15/15 (protocole 8, tick-writer 4, parité 3) ; Golden Hash ordinaires **18/18** inchangés ; suite complète **279/279** (30 fichiers, benchmark et tests longs exclus, rejouée après mise à jour documentaire) ; matrice Golden Hash longue **96/96** en instance Vitest isolée (165,66 s) ; build de production OK avec check-deps intégré. Aucun test de benchmark ni simulation longue 3B rejoué : aucun changement de règle, de PRNG ni de persistance ; le harnais worker utilise le bundle `dist/main/simulation/tick-compute.worker.js` produit par ce build.
 - **Validation tranche implémentation Phase 3D-C3/clôture 3D-C4** : check-deps OK ; typecheck 4 configs OK ; ciblés **57/57** (protocole, tick-writer, parité, client worker 10, verrou manager 7, intégration 7, Golden Hash) ; suite complète **298/298** (32 fichiers, benchmark et tests longs exclus) ; matrice Golden Hash longue **96/96** en instance Vitest isolée (158,84 s) ; simulation longue 3B **9/9** (5,59 s, rejouée car la frontière d'écriture du tick a été partagée) ; build de production OK avec check-deps intégré (2 145 modules). Surveillance : aucun processus Node/Vitest/Electron résiduel après les validations ; mémoire disponible 6 508 MiB, swap 0, charge 1,25 au contrôle final. Aucun benchmark lancé, aucune donnée utilisateur modifiée, aucun secret ajouté.
+- **Validation tranche implémentation Phase 3D-D** : check-deps OK ; typecheck 4 configs OK ; tests ciblés **63/63** (validateurs, lecture/IPC, hook, UI, compatibilité) ; suite complète **335/335** (36 fichiers, tests longs et benchmark exclus) ; Golden Hash ordinaires **18/18** strictement inchangés ; build de production OK ; `git diff --check` OK. Aucun benchmark, simulation longue, changement de schéma, de moteur, de PRNG, de worker ni de donnée utilisateur ; aucun secret ajouté. La matrice longue 96/96 et la simulation longue 9/9 ne sont pas rejouées : la tranche ne touche ni au calcul ni à la persistance.
 
 ## Tests échoués
 
@@ -406,4 +418,4 @@ Ajouts tranche implémentation Phase 3C — tranche 2 :
 
 ## Prochaine tâche précise
 
-Les tranches **3D-A, 3D-B et 3D-C1 à 3D-C4 sont terminées, validées, commitées et poussées**. Ne pas les recommencer. La mission s'arrête ici : ne pas démarrer **3D-D** (IPC de lecture et inspecteur UI) sans validation explicite distincte. Le calcul de production passe désormais par le worker de calcul via le client isolé, sans repli synchrone ; `stepSimulation()` reste uniquement la référence de test. La limitation de performance documentée (`persist()` réexporte toute la base, coût croissant avec l'historique) reste ouverte : hash en flux, persistance groupée et rétention de l'historique ne sont pas implémentés. La politique `forkFromStopped` reste documentée et **non implémentée**. Ne pas démarrer relations/événements canoniques/souvenirs/mort/LLM sans documentation de conception dédiée.
+La **Phase 3D est terminée, validée, commitée et poussée** (3D-A à 3D-D). Ne pas recommencer ces tranches. La mission s'arrête ici : ne pas démarrer la **3D-E** ni les relations/événements canoniques/souvenirs/mort/LLM sans validation explicite et documentation de conception dédiée. Le calcul de production passe par le worker via le client isolé, sans repli synchrone ; `stepSimulation()` reste la référence de test. L'inspecteur est strictement lecteur : aucun tick, statut, personnage ni état interne n'est modifiable depuis l'UI. Limites ouvertes : coût de `persist()` qui réexporte toute la base, rétention/purge de l'historique non implémentées, filtres de plage de ticks non exposés dans le panneau, et `forkFromStopped` documenté mais **non implémenté**.

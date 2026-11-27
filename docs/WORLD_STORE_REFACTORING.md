@@ -6,10 +6,11 @@
 > touchent plus directement au fichier ni à la transaction : ils passent par les
 > nouveaux services. Aucune réécriture générale n'a été tentée.
 >
-> Les sous-tranches 3D-C1 à 3D-C4 sont implémentées et validées : protocole partagé,
-> modules canoniques et `tick-writer.service.ts` extraits, worker de calcul branché
-> via `prepareTickInput()` / `commitTickResult()` et client dédié. Le nettoyage final
-> 3D-D reste à valider séparément.
+> Les sous-tranches 3D-C1 à 3D-C4 et la tranche 3D-D sont implémentées et validées :
+> protocole partagé, modules canoniques et `tick-writer.service.ts` extraits, worker de
+> calcul branché via `prepareTickInput()` / `commitTickResult()` et client dédié, puis
+> façade de lecture décision ajoutée sans toucher aux écritures. Le nettoyage final de la
+> façade (étapes 4 et 7) reste reporté : 3D-D n'a pas modifié les mutations existantes.
 
 ## 1. État réel après 3D-B
 
@@ -130,7 +131,7 @@ direct n'a été introduit en 3D-C2.
 | 5 | 3D-C1 | `worker-protocol.ts`, modules canoniques partagés, `tick-writer.service.ts` (appel synchrone) | livrée |
 | 6 | 3D-C2 | `tick-compute.worker.ts` autonome, parité et checksum | livrée |
 | 6b | 3D-C3 | `tick-compute-client.service.ts`, intégration manager, verrous et annulation | livrée |
-| 7 | 3D-D | nettoyage final de la façade et documentation | non commencée |
+| 7 | 3D-D | nettoyage final de la façade et documentation | reportée : la lecture décision a été extraite sans déplacer les écritures ; documentation 3D-D livrée |
 
 Le report de l'étape 4 est un choix de réversibilité : déplacer le CRUD aurait
 augmenté le diff sans améliorer la garantie de persistance. La façade expose déjà

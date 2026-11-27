@@ -167,7 +167,13 @@ export function serializeDecisionRecord(record: DecisionRecordV1): DecisionRecor
 export function deserializeDecisionRecord(row: DecisionRecordRow): DecisionRecordV1 {
   if (!(row.payload_blob instanceof Uint8Array)) throw new Error('BLOB d’enregistrement invalide.');
   if (row.payload_blob.length > DECISION_BLOB_MAX_BYTES) throw new Error('BLOB d’enregistrement trop volumineux.');
-  const raw = inflateSync(Buffer.from(row.payload_blob));
+  let raw: Buffer;
+  try {
+    raw = inflateSync(Buffer.from(row.payload_blob));
+  } catch {
+    // D6 : une corruption deflate reste une erreur technique métier homogène.
+    throw new Error('BLOB d’enregistrement corrompu.');
+  }
   if (raw.length > DECISION_PAYLOAD_MAX_BYTES) throw new Error('JSON d’enregistrement trop volumineux.');
   let parsed: unknown;
   try {

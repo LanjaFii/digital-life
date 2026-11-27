@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../src/renderer/App';
 import type { DigitalLifeApi } from '../src/shared/ipc';
 import type { Character } from '../src/shared/character';
+import type { SimulationStatusView } from '../src/shared/simulation';
 import type { WorldSummary } from '../src/shared/world';
 
 function makeWorld(overrides: Partial<WorldSummary> = {}): WorldSummary {
@@ -83,6 +84,8 @@ function installApi(overrides: Partial<DigitalLifeApi> = {}): DigitalLifeApi {
     simulationStep: vi.fn(),
     simulationSetSpeed: vi.fn(),
     simulationStop: vi.fn(),
+    getDecisionHistory: vi.fn().mockResolvedValue([]),
+    getDecisionRecord: vi.fn(),
     onSimulationStatusChanged: vi.fn().mockReturnValue(() => {}),
     ...overrides,
   };
@@ -161,5 +164,40 @@ describe('Reprise de monde (UI)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Menu principal/i }));
     await screen.findByText('Sauvegardes locales');
     expect(api.listWorlds).toHaveBeenCalled();
+  });
+
+  it('garde un seul abonnement au statut et ne recharge pas sur un tick identique', async () => {
+    let emit: ((status: SimulationStatusView) => void) | null = null;
+    const getDecisionHistory = vi.fn().mockResolvedValue([{
+      id: 'world-1:1:char-1', characterId: 'char-1', characterName: 'Alice Martin',
+      tick: 1, day: 1, hour: 1, previousActionId: null, selectedActionId: 'eat',
+      selectionRule: 'score_tiebreak_id', score: 1.25, reason: 'La faim est prioritaire.',
+      warningCount: 0,
+    }]);
+    const api = installApi({
+      getDecisionHistory,
+      onSimulationStatusChanged: vi.fn((callback: (status: SimulationStatusView) => void) => {
+        emit = callback;
+        return () => {};
+      }),
+    });
+    const baseStatus: SimulationStatusView = {
+      worldId: 'world-1', worldStatus: 'preparation', clock: null, isActive: false,
+    };
+
+    render(<App />);
+    await screen.findByText('Monde Test');
+    fireEvent.click(screen.getByRole('button', { name: /Reprendre/i }));
+    await screen.findByRole('heading', { name: 'Décisions récentes' });
+    expect(api.onSimulationStatusChanged).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(getDecisionHistory).toHaveBeenCalledTimes(1));
+
+    act(() => emit?.({ ...baseStatus, clock: { ...(baseStatus.clock ?? {}), worldId: 'world-1', tick: 0 } as NonNullable<SimulationStatusView['clock']> }));
+    await act(async () => { await Promise.resolve(); });
+    expect(getDecisionHistory).toHaveBeenCalledTimes(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 520));
+    act(() => emit?.({ ...baseStatus, clock: { ...(baseStatus.clock ?? {}), worldId: 'world-1', tick: 1 } as NonNullable<SimulationStatusView['clock']> }));
+    await waitFor(() => expect(getDecisionHistory).toHaveBeenCalledTimes(2));
   });
 });

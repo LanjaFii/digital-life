@@ -9,6 +9,7 @@ import { CharacterForm } from './CharacterForm';
 import { AddFromLibraryDialog } from './AddFromLibraryDialog';
 import { ConfirmDeleteCharacterDialog } from './ConfirmDeleteCharacterDialog';
 import { EMOTION_LABELS, TRAIT_LABELS, draftFromCharacter } from './character-labels';
+import { DecisionPanel } from './DecisionPanel';
 
 interface Props {
   worldId: string;
@@ -69,6 +70,13 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [simulation, setSimulation] = useState<SimulationStatusView | null>(null);
   const [simBusy, setSimBusy] = useState(false);
+  /** Unique source de rafraîchissement de l'inspecteur : le tick de l'horloge. */
+  const [decisionTick, setDecisionTick] = useState(0);
+
+  const syncDecisionTick = useCallback((status: SimulationStatusView) => {
+    const next = status.clock?.tick ?? 0;
+    setDecisionTick((current) => (current === next ? current : next));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,6 +90,7 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
       setWorld(nextWorld);
       setCharacters(charsResult.characters);
       setSimulation(simStatus);
+      syncDecisionTick(simStatus);
       setSelectedCharacterId((current) => (current && charsResult.characters.some((c) => c.id === current) ? current : null));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -91,7 +100,7 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [worldId]);
+  }, [worldId, syncDecisionTick]);
 
   useEffect(() => {
     void load();
@@ -101,10 +110,11 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
     const unsubscribe = window.digitalLife.onSimulationStatusChanged((status) => {
       if (status.worldId !== worldId) return;
       setSimulation(status);
+      syncDecisionTick(status);
       setWorld((current) => (current && current.id === worldId ? { ...current, status: status.worldStatus as WorldSummary['status'] } : current));
     });
     return unsubscribe;
-  }, [worldId]);
+  }, [worldId, syncDecisionTick]);
 
   const selectedCharacter = selectedCharacterId ? characters.find((c) => c.id === selectedCharacterId) ?? null : null;
   const worldStatus = simulation?.worldStatus ?? world?.status ?? 'preparation';
@@ -117,6 +127,7 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
     try {
       const next = await action();
       setSimulation(next);
+      syncDecisionTick(next);
       if (success) setNotice(success);
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : String(cause));
@@ -230,6 +241,7 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
           character={selectedCharacter}
           onBack={() => setSelectedCharacterId(null)}
           onDelete={canEditWorld ? () => setConfirmDeleteCharacter(selectedCharacter) : undefined}
+          decisions={{ worldId, revision: decisionTick }}
         />
         {editingCharacter && canEditWorld ? (
           <CharacterForm mode="edit" context="world" title={`Modifier ${editingCharacter.firstName} ${editingCharacter.lastName}`} initialDraft={draftFromCharacter(editingCharacter)} submitLabel="Enregistrer les modifications" onCancel={() => setEditingCharacter(null)} onSubmit={(draft) => handleUpdate(draft)} />
@@ -333,6 +345,8 @@ export function WorldView({ worldId, onBackToMenu }: Props) {
           <p className="muted-note">Ajoutez au moins un personnage avant de démarrer la simulation.</p>
         ) : null}
       </section>
+
+      <DecisionPanel worldId={worldId} revision={decisionTick} />
 
       <section className="panel">
         <div className="panel-header">

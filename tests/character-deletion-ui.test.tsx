@@ -80,6 +80,8 @@ function installApi(overrides: Partial<DigitalLifeApi> = {}): DigitalLifeApi {
     simulationStep: vi.fn(),
     simulationSetSpeed: vi.fn(),
     simulationStop: vi.fn(),
+    getDecisionHistory: vi.fn().mockResolvedValue([]),
+    getDecisionRecord: vi.fn(),
     onSimulationStatusChanged: vi.fn().mockReturnValue(() => {}),
     ...overrides,
   };

@@ -9,10 +9,11 @@
 > [GOAL_SELECTION_SYSTEM.md](GOAL_SELECTION_SYSTEM.md). Les étapes 5 et 10 à 15 restent
 > reportées (aucune mémoire, interaction, relation, événement ni mort implémentée).
 >
-> **Phase 3D [3D-A/3D-B/3D-C1/3D-C2/3D-C3/3D-C4 implémentées, 3D-D planifiée]** :
+> **Phase 3D [3D-A/3D-B/3D-C1/3D-C2/3D-C3/3D-C4/3D-D implémentées]** :
 > l'historique des décisions, la persistance atomique, les verrous, le protocole de calcul,
-> le worker de calcul et son intégration au manager sont livrés ; l'inspecteur UI reste
-> décrit dans [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Le calcul de production passe par
+> le worker de calcul, son intégration au manager et l'inspecteur UI en lecture seule sont
+> livrés ; voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md) et
+> [DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md). Le calcul de production passe par
 > le worker, sans repli synchrone dans le main.
 
 ## Principe
@@ -49,9 +50,10 @@ Le moteur calcule un objet `DecisionExplanation` par personnage et par tick : sc
 actions, facteurs dominants, état du PRNG, cycle, action retenue. Depuis la tranche **3D-A,
 ces explications sont persistées** dans `decision_records` sous forme d'enregistrements
 complets, compressés et vérifiés (voir [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md)).
-Elles ne sont **pas encore consultables depuis l'interface** : l'IPC et l'inspecteur minimal
-[DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md) relèvent de la tranche 3D-D, non
-implémentée. L'onglet Historique de la phase 7 reste [Planifié].
+Depuis la tranche **3D-D**, elles sont consultables depuis l'interface par deux canaux IPC
+lecture seule et un panneau « Décisions récentes » ; le détail est chargé à la demande et
+structuré en douze sections, sans graphique ni mutation de simulation. Voir
+[DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md). L'onglet Historique de la phase 7 reste [Planifié].
 
 ## Anti-boucles
 

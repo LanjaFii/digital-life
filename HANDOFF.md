@@ -3,8 +3,8 @@
 ## Où en est le développement
 
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
-- **HEAD avant implémentation 3D-C1/C2** : `d900ecd908aac01c10c947d8abd1e4d758f2a235` ; HEAD avant intégration 3D-C3/C4 : `c3a6232f70d830ca9adea311ee50377eb185b48d`, identique à `origin/main` au début de la tranche ; le commit de livraison est décrit dans `CHANGELOG.md`.
-- **Tranche courante** : **Phases 3D-C1 à 3D-C4 implémentées et validées** (protocole versionné, canonicalisation partagée, frontière d'écriture extraite, worker de calcul branché, intégration manager/verrous/annulation, documentation finale). Livraison par commit et push sans force sur `origin/main` effectuée dans cette tranche. 3D-D (IPC de lecture et inspecteur UI) reste non implémentée et exige une validation explicite distincte. Le calcul de production passe par le worker via le client isolé, sans repli synchrone ; l'ordonnancement et la persistance restent dans le main.
+- **HEAD avant implémentation 3D-C1/C2** : `d900ecd908aac01c10c947d8abd1e4d758f2a235` ; HEAD avant intégration 3D-C3/C4 : `c3a6232f70d830ca9adea311ee50377eb185b48d` ; HEAD avant 3D-D : `b22dd73d6ccb2c2baed0447ae318209d9a651613`, identique à `origin/main` au début de la tranche ; le commit de livraison est décrit dans `CHANGELOG.md`.
+- **Tranche courante** : **Phase 3D complète (3D-A à 3D-D) implémentée, validée et livrée**. La tranche 3D-D ajoute deux canaux IPC lecture seule (`decision:history`, `decision:record`) et l'inspecteur React en douze sections ; aucun schéma, moteur, PRNG, worker ni LLM modifié. Livraison par commit et push sans force sur `origin/main` effectuée dans cette tranche. Aucune phase suivante n'est démarrée. Le calcul de production passe par le worker via le client isolé, sans repli synchrone ; l'ordonnancement et la persistance restent dans le main.
 - **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution passive
   déterministe des 8 besoins et 10 émotions **puis** objectifs immédiats, scoring, décision,
   effets numériques et runtime persistés. Les artefacts du résultat (`decisions`,
@@ -13,7 +13,33 @@
   toute mutation passe par une file globale et le fichier SQLite est écrit par
   `temp + fsync + SHA-256 + rename`, avec restauration mémoire depuis le dernier état disque
   validé en cas d'échec avant `rename`. Aucun environnement, lieu, objet, ressource partagée,
-  relation, événement, souvenir, mort ni dialogue n'existe.
+  relation, événement, souvenir, mort ni dialogue n'existe. Depuis 3D-D, cet historique est
+  consultable par l'UI sans aucune écriture ni mutation de simulation.
+
+## Ce qui vient d'être réalisé (Phase 3D-D — IPC et inspecteur)
+
+- `src/shared/decision-view.ts` (nouveau) : contrats `DecisionHistoryQuery` et `DecisionSummaryView`,
+  constantes 50/500/1 000 000, validateurs stricts. `worldId` obligatoire sur les deux canaux ;
+  `getDecisionRecord(worldId, id)` (D1) ; pagination par `offset` (D2) ; échec strict de la page
+  si une ligne est corrompue (D3) ; filtrage sans dépendance à l'existence du personnage (D4) ;
+  tri `tick DESC, character_id ASC, id ASC` (D5) ; erreurs zlib normalisées et statements libérés
+  en `finally` (D6) ; `DecisionRecordV1` complet transmis au détail (D7) ; panneau `WorldView` +
+  accès depuis `CharacterDetail`, sans nouvelle page (D8).
+- `src/main/ipc/decision.ipc.ts`, `src/main/services/decision-read.service.ts` : deux handlers
+  lecture seule, validation dans le main avant tout accès SQLite, projection de douze champs
+  validés. Aucun BLOB, statement ni ligne brute ne traverse le preload ; aucun verrou de mutation.
+- `src/renderer/hooks/use-decision-history.ts`, `DecisionPanel.tsx`, `DecisionDetail.tsx`,
+  `decision-labels.ts` : hook throttle 500 ms avec jeton, états chargement/vide/erreur/réessai,
+  détail chargé seulement après sélection, douze sections typées (faits / motivations / moteur),
+  pagination par offset, absence de JSON brut et de Recharts. `WorldView` conserve l'unique
+  abonnement à `simulation:status-changed` et ne recharge que si `clock.tick` change.
+- Tests : quatre nouveaux fichiers (`decision-view`, `decision-read`, `decision-ipc`,
+  `decision-inspector-ui`), adaptation de `phase0` et des trois mocks UI, ajout dans
+  `world-resume-ui` de la vérification abonnement unique / tick identique. Ciblés 63/63,
+  suite complète 335/335, Golden Hash 18/18, typecheck 4 configs, check-deps et build OK.
+- Documentation : `DECISION_INSPECTOR_UI.md` réécrit en état livré ; `PHASE_3D_DESIGN.md`,
+  `DECISION_HISTORY_SYSTEM.md`, `ARCHITECTURE.md`, `DATABASE.md`, `SIMULATION_ENGINE.md`,
+  `WORLD_STORE_REFACTORING.md`, `README.md` et ce fichier mis à jour.
 
 ## Ce qui vient d'être réalisé (Phase 3C — documentaire)
 
@@ -343,7 +369,10 @@
 - `src/main/services/tick-writer.service.ts`, `src/main/simulation/tick-compute.worker.ts`, `src/main/simulation/tick-compute-client.service.ts` — frontière d'écriture, worker et client branché en 3D-C3.
 - `tests/worker-tick-protocol.test.ts`, `tests/worker-tick-parity.test.ts`, `tests/worker-tick-golden-matrix.long.test.ts` — validation du protocole, parité et références étendues.
 - `docs/PHASE_3D_DESIGN.md` — référence centrale et découpage en tranches.
-- `docs/DECISION_HISTORY_SYSTEM.md`, `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_INSPECTOR_UI.md` — conception détaillée.
+- `docs/DECISION_HISTORY_SYSTEM.md`, `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_INSPECTOR_UI.md` — conception détaillée et état livré de l'inspecteur.
+- `src/shared/decision-view.ts`, `src/main/ipc/decision.ipc.ts`, `src/main/services/decision-read.service.ts`, `src/main/services/decision-history.store.ts`, `src/main/services/decision-record.service.ts` — frontière de lecture décision, validation et intégrité ; aucun appel à `withWorldMutationLock()`.
+- `src/renderer/hooks/use-decision-history.ts`, `src/renderer/components/DecisionPanel.tsx`, `DecisionDetail.tsx`, `decision-labels.ts`, `WorldView.tsx`, `CharacterDetail.tsx` — seul point d'entrée UI ; le panneau ne doit jamais envoyer de commande de simulation.
+- `tests/decision-view.test.ts`, `tests/decision-read.test.ts`, `tests/decision-ipc.test.ts`, `tests/decision-inspector-ui.test.tsx`, `tests/phase0.test.ts` — contrats, isolation, corruption, throttle, jeton et parité des canaux.
 - `docs/DATABASE.md`, `docs/ARCHITECTURE.md` — constats corrigés sur la persistance et les workers.
 - `docs/EVENT_AND_MEMORY_SYSTEM.md`, `docs/SIMULATION_ENGINE.md` — étapes reportées et frontière avec l'historique technique.
 
@@ -365,11 +394,12 @@ bash scripts/dev.sh
 
 ## Prochaine tâche recommandée
 
-1. Les tranches **3D-A, 3D-B et 3D-C1 à 3D-C4 sont terminées, validées et livrées**. Ne pas les recommencer.
-2. La mission s'arrête ici : ne pas démarrer **3D-D** (IPC de lecture et inspecteur UI) sans
-   validation explicite distincte. La politique `simulation_stopped` reste inchangée ;
-   `forkFromStopped` reste reporté. Aucune purge, aucun export, aucun LLM, aucune optimisation
-   opportuniste de la persistance.
+1. La **Phase 3D est terminée, validée et livrée** (3D-A à 3D-D). Ne pas recommencer ces tranches.
+2. La mission s'arrête ici : ne pas démarrer la **3D-E** ni une phase 4 sans validation explicite
+   et design documenté. La politique `simulation_stopped` reste inchangée ; `forkFromStopped`
+   reste reporté. Aucune purge, aucun export, aucun LLM, aucune optimisation opportuniste de la
+   persistance.
 3. Limites ouvertes à documenter avant toute montée en charge : coût de `persist()` qui
    réexporte toute la base, rétention de l'historique non implémentée, calibrage des seuils
-   de décision à valider par simulation longue dédiée.
+   de décision à valider par simulation longue dédiée, filtres de plage de ticks non exposés
+   dans le panneau.

@@ -7,11 +7,12 @@
 > La tranche 3D-A ajoute uniquement l'historique technique : aucun IPC, preload, UI,
 > worker, verrou global ni changement de persistance fichier n'est concerné.
 >
-> **Statut : tranches 3D-A à 3D-C4 implémentées et validées.** Le calcul Phase 3C
+> **Statut : tranches 3D-A à 3D-D implémentées et validées.** Le calcul Phase 3C
 > reste byte-identique à entrées égales (18 Golden Hash inchangés, matrice étendue 96/96 en test
-> long isolé), y compris via le worker branché en 3D-C3. La suite complète passe 298/298
-> (32 fichiers, hors tests longs et benchmark), typecheck des quatre configurations et build
-> réussis. La tranche 3D-D reste à faire.
+> long isolé), y compris via le worker branché en 3D-C3. La suite complète passe 335/335
+> (36 fichiers, hors tests longs et benchmark), typecheck des quatre configurations et build
+> réussis. La tranche 3D-D ajoute uniquement une lecture IPC bornée et l'inspecteur UI :
+> aucun changement de schéma, de moteur, de PRNG ni de worker. Voir [DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md).
 
 ## 1. Deux notions distinctes
 
@@ -273,19 +274,22 @@ Mesures réelles effectuées après un tick avec la génération aléatoire par 
 
 **Limitation connue** : `persist()` réexporte l'intégralité de `worlds.sqlite` à chaque tick, avec double copie mémoire et double SHA-256. Le coût d'un tick croît donc avec le nombre d'enregistrements déjà stockés (3D-A : ~52 ms à ~157 ms pour 3 personnages entre les ticks 25 et 200 ; benchmarks 3D-B locaux : 63,68 ms au tick 10 et 377,56 ms au tick 200 pour 3 personnages, 548,45/1 329,12/1 652,77 ms pour 10/50/100 personnages, 1 254,09 ms/tick pour 3×10 mondes). Aucune mesure 3D-A comparable à effectif égal ne permet d'affirmer une amélioration. La 3D-B a ajouté la durabilité atomique et les verrous, pas l'optimisation : hash en flux, persistance groupée et rétention de l'historique restent à faire. Aucune purge n'est introduite. Voir [SAFE_PERSISTENCE.md](SAFE_PERSISTENCE.md) §10.
 
-Les helpers de lecture internes sont bornés à 500 entrées (défaut 50). La future UI appliquera elle aussi une fenêtre de 500 entrées maximum : ce n'est pas une limite de stockage.
+Les helpers de lecture internes sont bornés à 500 entrées (défaut 50). L'UI 3D-D applique
+elle aussi une fenêtre de 50 entrées par page, avec `offset` borné à 1 000 000 : ce n'est pas
+une limite de stockage.
 
-## 8. IPC proposé
+## 8. IPC livré en 3D-D
 
 Deux canaux de lecture uniquement :
 
 ```ts
 interface DecisionHistoryQuery {
-  worldId: string;
+  worldId: string;          // obligatoire
   characterId?: string;
   fromTick?: number;
   toTick?: number;
-  limit?: number;   // borné côté main à 500
+  limit?: number;           // 1..500, défaut 50
+  offset?: number;          // 0..1_000_000, défaut 0
 }
 
 interface DecisionSummaryView {
@@ -297,21 +301,26 @@ interface DecisionSummaryView {
   hour: number;
   previousActionId: string | null;
   selectedActionId: string;
-  selectionRule: string;
+  selectionRule: DecisionRule;
   score: number;
   reason: string;
   warningCount: number;
 }
 
 getDecisionHistory(query: DecisionHistoryQuery): Promise<DecisionSummaryView[]>;
-getDecisionRecord(id: string): Promise<DecisionRecordV1>;
+getDecisionRecord(worldId: string, id: string): Promise<DecisionRecordV1>;
 ```
 
-Les canaux proposés sont `DECISION_HISTORY: 'decision:history'` et
-`DECISION_RECORD: 'decision:record'`. La validation des bornes et l'ordre de tri sont
-décrits dans [DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md).
+Les canaux sont `DECISION_HISTORY: 'decision:history'` et
+`DECISION_RECORD: 'decision:record'`, enregistrés dans `src/main/ipc/decision.ipc.ts`.
+Le `worldId` est obligatoire sur les deux : l'ID `${worldId}:${tick}:${characterId}` seul ne
+garantit pas l'isolation entre mondes. La validation stricte des bornes, des clés et l'ordre
+de tri sont décrits dans [DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md).
 
-Aucune écriture, aucune suppression et aucun déclenchement de tick via ces canaux. Le renderer ne voit jamais de BLOB brut : le main décompresse et valide avant de renvoyer un objet typé.
+Aucune écriture, aucune suppression et aucun déclenchement de tick via ces canaux. Le renderer
+ne voit jamais de BLOB brut : le main décompresse, vérifie checksum/version/cohérence des colonnes
+et ne renvoie que des vues typées. Une ligne corrompue fait échouer toute la page. Les statements
+sont libérés dans un `finally` et les erreurs zlib sont normalisées.
 
 ## 9. Tests
 
@@ -333,6 +342,15 @@ Aucune écriture, aucune suppression et aucun déclenchement de tick via ces can
 - suppression d'un monde : cascade de l'historique ;
 - suppression d'une instance : historique conservé, avec insertion directe préalable via `_insertDecisionRecordForTests()` pendant la préparation ; la garde `assertWorldPreparation` vérifie uniquement `worlds.status`, pas l'historique ;
 - mesure de taille sur simulation longue.
+
+**Lecture 3D-D (`tests/decision-read.test.ts`, `tests/decision-view.test.ts`, `tests/decision-ipc.test.ts`)**
+
+- isolation mondes/personnages, tri `tick DESC, character_id ASC, id ASC`, pagination par `offset` ;
+- projection de douze champs exactement, sans BLOB ni charge utile complète ;
+- historique conservé après suppression du personnage, supprimé avec le monde ;
+- checksum altéré, BLOB corrompu, version inconnue, historique vide : erreurs ou liste vide sans rendu partiel ;
+- validation des bornes de requête, du format d'ID, des clés inconnues et des vues envoyées au renderer ;
+- deux canaux IPC uniquement, validation dans le main avant tout appel service.
 
 **Golden Hash (18 scénarios, `tests/decision-golden-hash.test.ts`)**
 

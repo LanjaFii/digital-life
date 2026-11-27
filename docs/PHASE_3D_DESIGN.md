@@ -1,7 +1,7 @@
 # Phase 3D — Consolidation du moteur
 
-> **Statut : conception validée. Les tranches 3D-A, 3D-B, 3D-C1, 3D-C2, 3D-C3 et 3D-C4 sont
-> implémentées et validées ; seule 3D-D reste planifiée.** HEAD avant conception 3D :
+> **Statut : conception validée. Les tranches 3D-A, 3D-B, 3D-C1 à 3D-C4 et 3D-D sont
+> implémentées et validées ; la Phase 3D est complète.** HEAD avant conception 3D :
 > `276384eb993e91f80a309e0864a54dbe1fdf8d53`, identique à `origin/main`. HEAD après
 > publication de la conception : `e060a07a71cad43932444ae56a00de13d72a1cf0`.
 > Ce document sert de référence d'architecture pour les tranches 3D-A à 3D-D.
@@ -149,23 +149,24 @@ Chaque tranche est autonome : tests, documentation, validation séquentielle (`c
 | **3D-C2 — Worker autonome** | `src/main/simulation/tick-compute.worker.ts` (nouveau), résolution du chemin du second worker, harnais `worker_threads` avec point d'injection contrôlé, réponses `result`/`error`, checksum sur le noyau Golden Hash. À cette sous-tranche, la production utilisait encore le calcul direct ; le branchement est réalisé en 3D-C3. | Messages valides/invalides et versions inconnues rejetés ; entrée identique → sortie identique ; aucun état résiduel entre requêtes ; checksum identique côté main et aux 18 hashes ; aucun SQLite, IPC ni fichier ouvert par le worker. |
 | **3D-C3 — Intégration et verrous** | `pendingComputes`, compteur `requestId`, timeout fixe 30 s, doublons/tardifs ignorés, gestion `error`/`exit`, recréation paresseuse, marqueur `origin: 'auto' \| 'manual'`, annulation immédiate à la suppression, scission de `stepSimulation()` en snapshot sous global / attente sous verrou monde / reprise globale avec `expected`, `before`, transaction courte et persistance. | Aucune écriture concurrente du même monde ; aucun tick partiel ; suppression pendant calcul sans écriture tardive ; timeout et crash rejettent l'IPC manuelle sans laisser `ipcMain.handle` sans réponse ; erreur automatique sans écriture ni changement de statut ; relecture d'horloge et restauration 3D-B intactes. |
 | **3D-C4 — Documentation et validation finale** | Mise à jour des documents concernés, puis séquence complète : check-deps → typecheck 4 configs → tests ciblés → suite complète → test long isolé → build → revue du diff. | 18 Golden Hash ordinaires verts et matrice complète en test long isolé ; suite complète verte ; build OK ; aucun secret ni fichier généré versionné ; commit et push sans force. |
+| **3D-D — IPC et inspecteur UI** | `src/shared/decision-view.ts` (nouveau), deux canaux lecture seule dans `src/shared/ipc.ts`, `decision.ipc.ts`, `decision-read.service.ts`, `DecisionPanel.tsx`, `DecisionDetail.tsx`, `decision-labels.ts`, `use-decision-history.ts`, intégration `WorldView`/`CharacterDetail`, tests dédiés et documentation. | Aucune écriture ni mutation de simulation ; `worldId` obligatoire et validation stricte côté main ; `limit <= 500`, pagination par `offset`, throttle 500 ms et jeton ; détail à la demande ; aucun BLOB dans le renderer ; bibliothèque inchangée. |
 
-- **Statut des sous-tranches (2026-11-27)** : 3D-C1 **livrée**, 3D-C2 **livrée**, 3D-C3 **livrée** (client de calcul, `pendingComputes`, verrous, origine, suppression sécurisée), 3D-C4 **livrée** (documentation et validation finale). Le client de calcul isolé dans `src/main/simulation/tick-compute-client.service.ts` est le seul point d'injection production du worker ; aucun repli synchrone n'est prévu.
-- **Validation** : 3D-C3/C4 ont été validées par check-deps, typecheck 4 configs, suite complète, Golden Hash, matrice longue isolée et build, puis livrées sur `origin/main` sans force. 3D-D reste à valider séparément avant tout démarrage.
+- **Statut des sous-tranches (2026-11-27)** : 3D-C1 **livrée**, 3D-C2 **livrée**, 3D-C3 **livrée** (client de calcul, `pendingComputes`, verrous, origine, suppression sécurisée), 3D-C4 **livrée** (documentation et validation finale), 3D-D **livrée** (IPC de lecture et inspecteur React). Le client de calcul isolé dans `src/main/simulation/tick-compute-client.service.ts` est le seul point d'injection production du worker ; aucun repli synchrone n'est prévu.
+- **Validation** : 3D-C3/C4 puis 3D-D ont été validées par check-deps, typecheck 4 configs, suite complète, Golden Hash, matrice longue isolée (3D-C) et build, puis livrées sur `origin/main` sans force. La Phase 3D est close ; toute tranche suivante exige une validation explicite.
 - **Exclusions globales** : SQLite dans le worker, LLM, événements Phase 5, compression des résultats, optimisation opportuniste de la persistance.
 
-### 4.4 Tranche 3D-D — IPC et interface minimale
+### 4.4 Tranche 3D-D — IPC et interface minimale (livrée)
 
 - **Objectif** : rendre l'historique consultable sans surcharger l'IPC ni exposer Node au renderer.
 - **Périmètre** : deux canaux de lecture, filtres bornés, action courante, dernières actions, inspecteur, rafraîchissement après changement de tick.
-- **Fichiers prévus** : `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/ipc/decision.ipc.ts` (nouveau), quatre composants renderer (`DecisionInspector.tsx`, `DecisionFilters.tsx`, `DecisionSummaryList.tsx`, `DecisionDetailView.tsx`), `WorldView.tsx`, `CharacterDetail.tsx`, tests UI/IPC, documentation.
-- **SQLite** : aucun changement de schéma.
-- **Contrats/services** : `DecisionHistoryQuery`, `DecisionSummaryView`, `getDecisionHistory`, `getDecisionRecord`.
+- **Fichiers livrés** : `src/shared/decision-view.ts`, `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/ipc/decision.ipc.ts`, `src/main/services/decision-read.service.ts`, `decision-history.store.ts`, `decision-record.service.ts`, `src/main/main.ts`, `DecisionPanel.tsx`, `DecisionDetail.tsx`, `decision-labels.ts`, `use-decision-history.ts`, `WorldView.tsx`, `CharacterDetail.tsx`, `global.css`, tests dédiés et documentation. Les quatre composants initialement envisagés ont été consolidés en `DecisionPanel` + `DecisionDetail` + `decision-labels` : une seule responsabilité par fichier, sans éparpillement inutile.
+- **SQLite** : aucun changement de schéma ; statements libérés en `finally`.
+- **Contrats/services** : `DecisionHistoryQuery`, `DecisionSummaryView`, `getDecisionHistory`, `getDecisionRecord(worldId, id)` ; `worldId` obligatoire sur les deux canaux (D1), pagination par `offset` (D2), échec strict de la page en cas de corruption (D3), filtrage sans dépendance à l'existence du personnage (D4), tri `tick DESC, character_id ASC, id ASC` (D5), erreurs zlib normalisées (D6), `DecisionRecordV1` complet transmis au détail (D7), panneau dans `WorldView` et accès facultatif depuis `CharacterDetail` (D8).
 - **Dépendances** : 3D-C.
-- **Tests** : validation des bornes de requête, filtres monde/personnage/tick, absence de BLOB brut, charger/erreur/vide, throttle, désabonnement, absence de `ipcRenderer`/Node dans le renderer.
+- **Tests** : validation des bornes de requête, filtres monde/personnage/tick, absence de BLOB brut, charger/erreur/vide, throttle, jeton, désabonnement, absence de mutation depuis l'inspecteur, compatibilité UI existante.
 - **Acceptation** : zéro accès Node dans le renderer ; `limit <= 500` ; une recharge au plus toutes les 500 ms ; aucun événement IPC par personnage.
 - **Risques/prévention** : surcharge → throttle et demande à la sélection ; données périmées → jeton de requête ; régression UI → tests Testing Library.
-- **Exclusions** : graphiques Recharts, historique temps réel par personnage, filtres textuels, purge, export/import.
+- **Exclusions** : graphiques Recharts, historique temps réel par personnage, filtres textuels, purge, export/import. Voir [DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md) §10 pour les limites connues.
 
 ## 5. Décisions techniques
 
@@ -360,7 +361,7 @@ La principale erreur serait de faire marcher le worker et la persistance en para
 11. **Timeout et concurrence (P8)** : constante 30 s ; entrée `pending` retirée avant rejet ; doublons et réponses tardives ignorés ; aucun retry automatique.
 12. **Golden Hash** : 18 scénarios historiques en suite ordinaire ; matrice complète 6 profils × 1/2/10/50 personnages × 24/72/168/720 ticks en test long isolé.
 
-Aucune de ces décisions n'autorise un appel réseau, une modification de l'UI, un changement de schéma SQLite ou un benchmark. Le calcul a été déplacé hors du main uniquement dans la tranche 3D-C3 validée ; 3D-C1 et 3D-C2 avaient respecté la limite en livrant le worker sans branchement. 3D-D reste soumise à une validation explicite distincte.
+Aucune de ces décisions n'autorise un appel réseau, un changement de schéma SQLite ou un benchmark. Le calcul a été déplacé hors du main uniquement dans la tranche 3D-C3 validée ; 3D-C1 et 3D-C2 avaient respecté la limite en livrant le worker sans branchement. La modification de l'UI s'est limitée à la tranche 3D-D validée : deux canaux de lecture, aucun contrôle de simulation. La Phase 3D est close ; la tranche suivante (3D-E) n'est pas démarrée.
 
 ## 11. Références
 

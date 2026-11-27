@@ -60,6 +60,8 @@ describe('Sécurité IPC', () => {
       SIMULATION_SPEED: 'simulation:speed',
       SIMULATION_STOP: 'simulation:stop',
       SIMULATION_STATUS_CHANGED: 'simulation:status-changed',
+      DECISION_HISTORY: 'decision:history',
+      DECISION_RECORD: 'decision:record',
     });
   });
 

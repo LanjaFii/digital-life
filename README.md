@@ -5,13 +5,14 @@ conditions initiales ; les personnages évoluent ensuite librement. L'utilisateu
 n'écrit pas les histoires : elles émergent des décisions, des relations et des
 conséquences calculées par le moteur.
 
-> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C tranche 3 terminée** (décisions et actions autonomes déterministes intégrées au tick, runtime et PRNG persistés atomiquement), **3D-A à 3D-C4 implémentées** (historique des décisions ; persistance atomique, restauration mémoire et verrous ; protocole, worker de calcul branché et intégration au manager). Relations, événements, souvenirs, mort et LLM non implémentés.
+> **Statut** : Phase 0 validée, Phase 1 fonctionnelle (CRUD instances complet), Phase 2 documentaire réalisée, **Phase 3A infrastructure simulation implémentée** (horloge, PRNG sérialisable, worker, IPC, persistance SQLite, UI minimale), **Phase 3B implémentée** (évolution déterministe des 8 besoins et 10 émotions au tick, services purs + transaction SQLite atomique), **Phase 3C tranche 3 terminée** (décisions et actions autonomes déterministes intégrées au tick, runtime et PRNG persistés atomiquement), **Phase 3D complète** (historique des décisions ; persistance atomique et verrous ; worker de calcul branché ; IPC de lecture et inspecteur UI). Relations, événements, souvenirs, mort et LLM non implémentés.
 > Node portable, dépendances, WASM, Electron 45.4.1 (SHA-256 vérifié), typecheck,
-> tests (suite complète 298/298 hors tests longs et benchmark ; matrice Golden Hash longue 96/96 ; test long
-> isolé antérieur 9/9), build et smoke test Electron réel Linux validés. Les sous-tranches
-> **3D-C1 à 3D-C4 sont implémentées** : protocole versionné, canonicalisation partagée,
-> frontière d'écriture, worker de calcul et client dédié (corrélation, timeout 30 s, annulation,
-> verrous monde). L'IPC/UI 3D-D reste à implémenter. Le code réel et `PROGRESS.md` font foi.
+> tests (suite complète 335/335 hors tests longs et benchmark ; matrice Golden Hash longue 96/96 ; 18 Golden Hash
+> ordinaires inchangés ; test long isolé antérieur 9/9), build et smoke test Electron réel Linux validés.
+> Les sous-tranches **3D-C1 à 3D-C4 et 3D-D sont implémentées** : protocole versionné,
+> canonicalisation partagée, frontière d'écriture, worker de calcul et client dédié
+> (corrélation, timeout 30 s, annulation, verrous monde), puis deux canaux de lecture et
+> l'inspecteur React. Le code réel et `PROGRESS.md` font foi.
 
 ## Fonctionnalités
 
@@ -41,16 +42,17 @@ conséquences calculées par le moteur.
 - **Infrastructure simulation Phase 3A** : horloge interne persistée (`simulation_clock`), PRNG sérialisable/restaurable, worker Node `worker_threads` piloté par le main, commandes IPC `start/pause/resume/step/setSpeed/stop/getStatus`, reprise après redémarrage (running → paused), UI minimale de contrôle du temps (jour/heure/tick/vitesse/statut).
 - **Évolution Phase 3B** : à chaque tick, les 8 besoins et 10 émotions évoluent selon des règles déterministes et explicables (services purs, traits de personnalité, snapshot immuable, arrondi half-even aux centièmes), appliquées dans la même transaction SQLite que l'horloge. Les valeurs actualisées sont visibles dans la fiche personnage ; aucune nouvelle UI.
 - **Décisions/actions Phase 3C (tranche 3)** : à chaque tick, objectifs immédiats, évaluation des actions réalisables, décision explicable (PRNG seulement en ex æquo), effets numériques et machine à états des actions longues ; runtime d'action (`current_action_json`), états et `rngState` persistés dans la même transaction. Aucun appel LLM, aucune ressource ni lieu inventé. Aucune nouvelle UI.
-- **Historique des décisions (Phase 3D-A)** : une ligne complète et compressée par personnage et par tick dans `decision_records`, écrite dans la même transaction que l'état, avec hash SHA-256 de la charge utile, versions du moteur/registre/paramètres et validation stricte à la lecture. Anciennes sauvegardes lisibles (migration `3D-1`), aucune purge ni backfill. Aucune UI ni IPC : l'historique n'est pas encore consultable depuis l'interface.
+- **Historique des décisions (Phase 3D-A, consultable depuis 3D-D)** : une ligne complète et compressée par personnage et par tick dans `decision_records`, écrite dans la même transaction que l'état, avec hash SHA-256 de la charge utile, versions du moteur/registre/paramètres et validation stricte à la lecture. Anciennes sauvegardes lisibles (migration `3D-1`), aucune purge ni backfill.
 - **Persistance et verrous (Phase 3D-B)** : toute mutation est sérialisée par un verrou global ordonné après le verrou du monde ; le fichier SQLite est remplacé par `temp + fsync + SHA-256 + rename` et la base mémoire est restaurée depuis le dernier état disque validé si une étape échoue avant `rename`. Suppression de monde sérialisée, aucun changement de schéma ni de calcul.
 - **Calcul du tick en worker dédié (Phase 3D-C3)** : le tick est préparé sous verrou global court, calculé dans `tick-compute.worker.ts` via un client isolé (`requestId` monotone, timeout fixe 30 s, doublons et réponses tardives ignorés), puis validé et persis dans le main sous verrou monde → global. Aucun repli synchrone ; erreur manuelle propagée à l'IPC, erreur automatique journalisée sans écriture. Suppression de monde : tombeau et annulation avant toute attente de verrou. Aucune UI ajoutée.
+- **Inspecteur de décisions (Phase 3D-D)** : panneau « Décisions récentes » dans l'écran monde et accès facultatif depuis la fiche personnage. Deux canaux IPC lecture seule (`decision:history`, `decision:record`), `worldId` obligatoire, résumés bornés (50 par page, 500 maximum) et détail structuré en douze sections. Aucun BLOB brut, aucune mutation de simulation, aucun graphique ; rafraîchissement au plus toutes les 500 ms sur changement de tick.
 
-### Planifiées (tranche 3D-D puis phases 4 à 8)
-**Phase 3D [conçue ; 3D-A à 3D-C4 implémentées]** : restent à implémenter
-l'IPC de lecture et l'inspecteur minimal (3D-D). Relations et
-mémoire, événements canoniques, mort et deuil, dialogues OpenRouter facultatifs, tableaux de
-bord et statistiques, packaging. Restent reportés : `forkFromStopped`, hystérésis des objectifs,
-actions Tier B (environnement), purge/archivage de l'historique, optimisations de persistance.
+### Planifiées (phases 4 à 8 et tranches ultérieures)
+**Phase 3D [conçue et livrée ; 3D-A à 3D-D implémentées]** : l'IPC de lecture et l'inspecteur
+minimal sont livrés. Restent à implémenter : relations et mémoire, événements canoniques, mort
+et deuil, dialogues OpenRouter facultatifs, tableaux de bord et statistiques, packaging. Restent
+reportés : `forkFromStopped`, hystérésis des objectifs, actions Tier B (environnement),
+purge/archivage de l'historique, optimisations de persistance.
 Les décisions validées (rétention sans purge, pas d'export, timeout worker 30 s fixe,
 checksum sur le noyau Golden Hash sans `decisionRecords`, verrou monde sur toute écriture
 ciblée, annulation avant verrous à la suppression, `engineVersion = 'phase3d.1'`, ordre des

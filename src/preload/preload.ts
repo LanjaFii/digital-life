@@ -30,6 +30,8 @@ const api: DigitalLifeApi = {
   simulationStep: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_STEP, worldId),
   simulationSetSpeed: (worldId, speed) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_SPEED, worldId, speed),
   simulationStop: (worldId) => ipcRenderer.invoke(IPC_CHANNELS.SIMULATION_STOP, worldId),
+  getDecisionHistory: (query) => ipcRenderer.invoke(IPC_CHANNELS.DECISION_HISTORY, query),
+  getDecisionRecord: (worldId, id) => ipcRenderer.invoke(IPC_CHANNELS.DECISION_RECORD, worldId, id),
   onSimulationStatusChanged: (callback) => {
     const listener = (_event: Electron.IpcRendererEvent, status: unknown) => {
       callback(status as never);

@@ -1,12 +1,15 @@
 import { ArrowLeft, Brain, Heart, Sparkles, Target, Trash2, User } from 'lucide-react';
 import type { Character } from '../../shared/character';
 import { StatBar } from './StatBar';
+import { DecisionPanel } from './DecisionPanel';
 
 interface Props {
   character: Character;
   onBack: () => void;
   /** Fourni uniquement pour une instance de monde (jamais pour un modèle de bibliothèque). */
   onDelete?: () => void;
+  /** Accès facultatif à l'historique : absent pour un modèle de bibliothèque. */
+  decisions?: { worldId: string; revision: number };
 }
 
 const TRAIT_LABELS: Record<string, string> = {
@@ -63,7 +66,7 @@ function genderLabel(gender: Character['gender']): string {
   return 'Non binaire';
 }
 
-export function CharacterDetail({ character, onBack, onDelete }: Props) {
+export function CharacterDetail({ character, onBack, onDelete, decisions }: Props) {
   const state = character.currentState;
   const primary = state.goals.find((g) => g.kind === 'primary');
   const secondary = state.goals.filter((g) => g.kind === 'secondary');
@@ -144,6 +147,15 @@ export function CharacterDetail({ character, onBack, onDelete }: Props) {
           </div>
         </section>
       </div>
+
+      {decisions ? (
+        <DecisionPanel
+          worldId={decisions.worldId}
+          revision={decisions.revision}
+          characterId={character.id}
+          title="Décisions de ce personnage"
+        />
+      ) : null}
     </div>
   );
 }

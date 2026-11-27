@@ -8,6 +8,13 @@
 import type { Database } from 'sql.js';
 import type { DecisionRecordPayloadV1, DecisionRecordV1 } from '../../shared/decision';
 import {
+  DECISION_HISTORY_DEFAULT_LIMIT,
+  DECISION_HISTORY_MAX_LIMIT,
+  DECISION_HISTORY_MAX_OFFSET,
+  validateDecisionRecordId,
+  validateDecisionWorldId,
+} from '../../shared/decision-view';
+import {
   DECISION_BLOB_MAX_BYTES,
   DECISION_PAYLOAD_MAX_BYTES,
   deserializeDecisionRecord,
@@ -17,8 +24,9 @@ import {
 } from './decision-record.service';
 
 export const DECISION_HISTORY_MIGRATION = '3D-1';
-export const DECISION_HISTORY_DEFAULT_READ_LIMIT = 50;
-export const DECISION_HISTORY_MAX_READ_LIMIT = 500;
+/** Alias conservés pour les contrats existants (3D-A) ; source unique en shared. */
+export const DECISION_HISTORY_DEFAULT_READ_LIMIT = DECISION_HISTORY_DEFAULT_LIMIT;
+export const DECISION_HISTORY_MAX_READ_LIMIT = DECISION_HISTORY_MAX_LIMIT;
 
 export interface DecisionHistoryReadQuery {
   worldId: string;
@@ -26,6 +34,7 @@ export interface DecisionHistoryReadQuery {
   fromTick?: number;
   toTick?: number;
   limit?: number;
+  offset?: number;
 }
 
 /** Crée les tables et index de façon additive, puis enregistre la migration. */
@@ -189,19 +198,30 @@ function boundedLimit(limit: number | undefined): number {
   return limit;
 }
 
-/** Lecture interne bornée, utilisée par les tests 3D-A puis par l'IPC 3D-D. */
+function boundedOffset(offset: number | undefined): number {
+  if (offset === undefined) return 0;
+  if (!Number.isInteger(offset) || offset < 0 || offset > DECISION_HISTORY_MAX_OFFSET) {
+    throw new Error(`Décalage de lecture invalide : 0..${DECISION_HISTORY_MAX_OFFSET} attendu.`);
+  }
+  return offset;
+}
+
+/** Lecture interne bornée, utilisée par les tests 3D-A puis par le service 3D-D. */
 export function listDecisionRecords(
   db: Database,
   query: DecisionHistoryReadQuery,
 ): DecisionRecordV1[] {
-  if (!query.worldId || typeof query.worldId !== 'string') throw new Error('Identifiant de monde invalide.');
+  const worldId = validateDecisionWorldId(query.worldId);
   const limit = boundedLimit(query.limit);
+  const offset = boundedOffset(query.offset);
   const clauses = ['world_id = ?'];
-  const values: Array<string | number> = [query.worldId];
+  const values: Array<string | number> = [worldId];
   if (query.characterId !== undefined) {
-    if (!query.characterId || typeof query.characterId !== 'string') throw new Error('Identifiant de personnage invalide.');
+    if (typeof query.characterId !== 'string' || !query.characterId.trim()) {
+      throw new Error('Identifiant de personnage invalide.');
+    }
     clauses.push('character_id = ?');
-    values.push(query.characterId);
+    values.push(query.characterId.trim());
   }
   if (query.fromTick !== undefined) {
     if (!Number.isInteger(query.fromTick) || query.fromTick < 0) throw new Error('fromTick invalide.');
@@ -213,12 +233,15 @@ export function listDecisionRecords(
     clauses.push('tick <= ?');
     values.push(query.toTick);
   }
-  values.push(limit);
+  if (query.fromTick !== undefined && query.toTick !== undefined && query.fromTick > query.toTick) {
+    throw new Error('La plage de ticks est invalide.');
+  }
+  values.push(limit, offset);
   const stmt = db.prepare(`
     SELECT * FROM decision_records
     WHERE ${clauses.join(' AND ')}
-    ORDER BY tick DESC, character_id ASC
-    LIMIT ?
+    ORDER BY tick DESC, character_id ASC, id ASC
+    LIMIT ? OFFSET ?
   `);
   stmt.bind(values);
   const rows: DecisionRecordRow[] = [];
@@ -227,36 +250,84 @@ export function listDecisionRecords(
   } finally {
     stmt.free();
   }
+  // D3 : une seule ligne corrompue fait échouer la page entière, sans rendu partiel.
   return rows.map(deserializeDecisionRecord);
 }
 
+/** Lecture d'un enregistrement par identifiant, avec filtre de monde obligatoire. */
+export function getDecisionRecordForWorld(
+  db: Database,
+  worldId: string,
+  id: string,
+): DecisionRecordV1 {
+  const validWorldId = validateDecisionWorldId(worldId);
+  const validId = validateDecisionRecordId(id);
+  const stmt = db.prepare('SELECT * FROM decision_records WHERE world_id = ? AND id = ?');
+  stmt.bind([validWorldId, validId]);
+  let row: DecisionRecordRow | null = null;
+  try {
+    if (stmt.step()) row = rowFromDb(stmt.getAsObject());
+  } finally {
+    stmt.free();
+  }
+  if (!row) throw new Error('Enregistrement de décision introuvable.');
+  const record = deserializeDecisionRecord(row);
+  if (record.explanation.worldId !== validWorldId) {
+    throw new Error('Enregistrement de décision étranger à ce monde.');
+  }
+  return record;
+}
+
+/** Lecture sans filtre de monde : uniquement pour les tests 3D-A. */
 export function getDecisionRecord(db: Database, id: string): DecisionRecordV1 {
-  if (!id || typeof id !== 'string') throw new Error('Identifiant d’enregistrement invalide.');
+  const validId = validateDecisionRecordId(id);
   const stmt = db.prepare('SELECT * FROM decision_records WHERE id = ?');
-  stmt.bind([id]);
-  const row = stmt.step() ? rowFromDb(stmt.getAsObject()) : null;
-  stmt.free();
+  stmt.bind([validId]);
+  let row: DecisionRecordRow | null = null;
+  try {
+    if (stmt.step()) row = rowFromDb(stmt.getAsObject());
+  } finally {
+    stmt.free();
+  }
   if (!row) throw new Error('Enregistrement de décision introuvable.');
   return deserializeDecisionRecord(row);
 }
 
 export function countDecisionRecords(db: Database, worldId: string, characterId?: string): number {
+  const validWorldId = validateDecisionWorldId(worldId);
   const clauses = ['world_id = ?'];
-  const values: Array<string | number> = [worldId];
+  const values: Array<string | number> = [validWorldId];
   if (characterId !== undefined) {
+    if (typeof characterId !== 'string' || !characterId.trim()) {
+      throw new Error('Identifiant de personnage invalide.');
+    }
     clauses.push('character_id = ?');
-    values.push(characterId);
+    values.push(characterId.trim());
   }
   const stmt = db.prepare(`SELECT COUNT(*) AS count FROM decision_records WHERE ${clauses.join(' AND ')}`);
   stmt.bind(values);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
+  let row: Record<string, unknown> | null = null;
+  try {
+    if (stmt.step()) row = stmt.getAsObject();
+  } finally {
+    stmt.free();
+  }
   return row ? Number(row.count) : 0;
 }
 
+/**
+ * Lignes brutes réservées aux tests d'intégrité 3D-A : jamais exposées à l'IPC.
+ * La limite reste bornée pour interdire tout balayage non contrôlé.
+ */
 export function getDecisionRecordRows(db: Database, worldId: string): DecisionRecordRow[] {
-  const stmt = db.prepare('SELECT * FROM decision_records WHERE world_id = ? ORDER BY tick DESC, character_id ASC');
-  stmt.bind([worldId]);
+  const validWorldId = validateDecisionWorldId(worldId);
+  const stmt = db.prepare(`
+    SELECT * FROM decision_records
+    WHERE world_id = ?
+    ORDER BY tick DESC, character_id ASC, id ASC
+    LIMIT ?
+  `);
+  stmt.bind([validWorldId, DECISION_HISTORY_MAX_READ_LIMIT]);
   const rows: DecisionRecordRow[] = [];
   try {
     while (stmt.step()) rows.push(rowFromDb(stmt.getAsObject()));

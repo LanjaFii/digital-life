@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerAppIpc } from './ipc/app.ipc';
 import { registerCharacterIpc } from './ipc/character.ipc';
+import { registerDecisionIpc } from './ipc/decision.ipc';
 import { registerSimulationIpc } from './ipc/simulation.ipc';
 import { registerWorldIpc } from './ipc/world.ipc';
 import { shutdownSimulationManager } from './services/simulation-manager.service';
@@ -44,6 +45,7 @@ registerAppIpc();
 registerWorldIpc();
 registerCharacterIpc();
 registerSimulationIpc();
+registerDecisionIpc();
 
 void app.whenReady().then(async () => {
   try {

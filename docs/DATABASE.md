@@ -163,7 +163,14 @@ contrôle.
 - écriture dans la même transaction que l'état du tick ;
 - aucun backfill, aucune purge, aucun export en 3D-A.
 
-Voir [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md) et
+La 3D-D n'a ajouté **aucune colonne, aucun index et aucune table** : les canaux
+`decision:history` et `decision:record` lisent ces colonnes via
+`decision-read.service.ts`, avec `world_id` obligatoire, tri `tick DESC,
+character_id ASC, id ASC` et `LIMIT/OFFSET` bornés. Le BLOB n'est jamais transmis au
+renderer ; une ligne corrompue fait échouer la page entière.
+
+Voir [DECISION_HISTORY_SYSTEM.md](DECISION_HISTORY_SYSTEM.md),
+[DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md) et
 [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md). Cet historique technique reste distinct du
 journal canonique d'événements de la Phase 5.
 

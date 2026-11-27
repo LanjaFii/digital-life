@@ -2,6 +2,37 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-27 — Phase 3D-D (IPC de lecture et inspecteur de décisions)
+
+### Added
+- `src/shared/decision-view.ts` : `DecisionHistoryQuery`, `DecisionSummaryView`, bornes 50/500/1 000 000 et validateurs purs ; `worldId` obligatoire sur les deux canaux.
+- `src/main/ipc/decision.ipc.ts` : deux handlers `ipcMain.handle` strictement lecture seule (`decision:history`, `decision:record`), validation des paramètres dans le main avant tout appel service.
+- `src/main/services/decision-read.service.ts` : façade de lecture, projection validée de douze champs, décompression et vérification déléguées au store ; aucun BLOB ni ligne SQLite brute ne traverse le preload.
+- `src/renderer/hooks/use-decision-history.ts` : hooks de liste et de détail, throttle 500 ms, jeton d'obsolescence, états chargement/vide/erreur, réessai, désabonnement et timer nettoyés, détail chargé uniquement après sélection.
+- `src/renderer/components/DecisionPanel.tsx`, `DecisionDetail.tsx`, `decision-labels.ts` : liste bornée avec pagination par offset, détail typé en douze sections repliables, badges fait observé / motivation / explication du moteur, aucun JSON brut ni graphique décoratif.
+- Tests : `tests/decision-view.test.ts`, `tests/decision-read.test.ts`, `tests/decision-ipc.test.ts`, `tests/decision-inspector-ui.test.tsx` ; vérification de l'abonnement unique et du tick identique dans `tests/world-resume-ui.test.tsx`.
+
+### Changed
+- `src/shared/ipc.ts`, `src/preload/preload.ts`, `src/main/main.ts` : ajout des deux canaux et de `getDecisionHistory`/`getDecisionRecord`, enregistrement du module IPC.
+- `src/main/services/decision-history.store.ts` : tri stable `tick DESC, character_id ASC, id ASC`, pagination `LIMIT/OFFSET`, filtres sans jointure sur `characters`, statements libérés en `finally`, erreurs zlib normalisées, échec strict de toute la page si un enregistrement est corrompu.
+- `src/main/services/decision-record.service.ts` : normalisation des erreurs de décompression.
+- `src/renderer/components/WorldView.tsx`, `CharacterDetail.tsx`, `src/renderer/styles/global.css` : panneau « Décisions récentes » et accès facultatif depuis la fiche personnage ; `decisionTick` dérivé de `clock.tick` sans changement d'état si le tick est identique.
+- `tests/phase0.test.ts` et trois mocks UI : adaptation à la surface `DigitalLifeApi` élargie.
+- Documentation : `docs/DECISION_INSPECTOR_UI.md` (état livré), `docs/PHASE_3D_DESIGN.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE.md`, `docs/SIMULATION_ENGINE.md`, `docs/WORLD_STORE_REFACTORING.md`, `README.md`, `PROGRESS.md`, `HANDOFF.md`.
+
+### Fixed
+- Collisions de sélecteurs Testing Library sur les boutons de pagination : libellés visibles « Retour » / « Plus » et `aria-label` distincts « Reculer/Avancer d'une page ».
+- Réponse périmée d'une requête d'historique ignorée via jeton ; plus de mise à jour d'état après démontage ou changement de filtre.
+
+### Removed
+- Aucune fonctionnalité existante ; aucun bouton ni canal retiré ; bibliothèque de personnages inchangée.
+
+### Technical decisions
+- D1 : `getDecisionRecord(worldId, id)` avec `worldId` obligatoire ; D2 : pagination par `offset` (défaut 50) ; D3 : échec strict de la page corruption ; D4 : historique indépendant de l'existence du personnage ; D5 : tri stable par tick/personnage/id ; D6 : `finally` + erreurs zlib normalisées ; D7 : `DecisionRecordV1` complet envoyé au détail ; D8 : panneau dans `WorldView` et accès depuis `CharacterDetail`, sans nouvelle page.
+- Aucun changement de schéma SQLite, de moteur de décision, de PRNG, de worker de calcul, de règles de simulation, de LLM ni de données utilisateur ; aucune mutation depuis l'inspecteur (ni tick, ni statut, ni personnage, ni état interne).
+- Validations séquentielles : check-deps OK, typecheck 4 configs OK, ciblés 63/63, suite complète 335/335 (36 fichiers, longs et benchmark exclus), Golden Hash 18/18 inchangés, build de production OK, `git diff --check` OK. Matrice longue et simulation longue non rejouées : aucun changement de calcul ni de persistance.
+- Avis indépendant : la Phase 3D est close ; ne pas démarrer 3D-E ni les fonctionnalités Phase 4 sans validation explicite distincte.
+
 ## 2026-11-27 — Phase 3D-C3 et 3D-C4 (worker branché, intégration et clôture)
 
 ### Added

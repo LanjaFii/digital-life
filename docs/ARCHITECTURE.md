@@ -49,15 +49,20 @@ chiffrée via `safeStorage` (Phase 6).
 - **Source de vérité** : SQLite `simulation_clock`, `worlds.status` et `characters.current_*_json`, écrits uniquement par le main.
 - **Commandes** : `simulation:status/start/pause/resume/step/speed/stop` (IPC validé). Le renderer ne peut pas écrire l'horloge directement.
 - **Tick atomique** : transaction SQLite + une seule écriture disque atomique par commande/tick. Depuis la Phase 3C, le tick calcule aussi besoins, émotions, décisions, effets et runtime.
-- **Explications** : `decisions`, `actionDeltas`, `actionRuntimeStates`, `deltas` et `warnings` sont remplis ; depuis 3D-A, une ligne complète par décision est persistée dans `decision_records`. Aucune UI n'y accède encore.
+- **Explications** : `decisions`, `actionDeltas`, `actionRuntimeStates`, `deltas` et `warnings` sont remplis ; depuis 3D-A, une ligne complète par décision est persistée dans `decision_records`. Depuis 3D-D, l'UI les consulte par deux canaux IPC lecture seule, sans jamais écrire ni muter la simulation.
 - **Verrous/persistance (3D-B)** : ordre monde → global, file d'écriture module-level, `temp + fsync + SHA-256 + rename`, restauration mémoire depuis le dernier état disque validé, suppression de monde sérialisée.
 - **Déterminisme** : seed simulation = `world.seed ^ 0x85ebca6b`, `rng_state` uint32 persisté, tri des personnages par identifiant, au plus un tirage PRNG par décision en ex æquo réel.
 - **Reprise** : au démarrage app, les horloges `running` sont converties en `paused` (pas d'auto-reprise).
 - **Arrêt** : `simulation_stopped` conserve les données ; pas de redémarrage implicite.
+- **Consultation des décisions (3D-D)** : `decision.ipc.ts` valide strictement deux canaux lecture
+  seule (`decision:history`, `decision:record`) ; `decision-read.service.ts` décompresse, valide
+  et projette les enregistrements sans jamais exposer de BLOB ni de ligne SQLite au renderer.
+  `use-decision-history.ts`, `DecisionPanel.tsx` et `DecisionDetail.tsx` affichent les vues ;
+  le renderer ne déclenche aucune mutation du moteur. Le `worldId` est obligatoire sur les deux canaux.
 
 ## Évolutions possibles
 
-- **Phase 3D [3D-A/3D-B/3D-C1/3D-C2/3D-C3/3D-C4 implémentées, 3D-D planifiée]** : historique des décisions, verrou global d'écriture, persistance atomique, protocole, worker de calcul et intégration au manager livrés ; l'inspecteur UI minimal reste à faire. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md).
+- **Phase 3D [3D-A/3D-B/3D-C1/3D-C2/3D-C3/3D-C4/3D-D implémentées]** : historique des décisions, verrou global d'écriture, persistance atomique, protocole, worker de calcul, intégration au manager, IPC de lecture et inspecteur UI minimal livrés. Voir [PHASE_3D_DESIGN.md](PHASE_3D_DESIGN.md) et [DECISION_INSPECTOR_UI.md](DECISION_INSPECTOR_UI.md).
 - Ajouter des règles métier futures (relations, événements, souvenirs) en conservant transaction atomique et déterminisme.
 - Ajouter un worker d'analyse statistique distinct du worker de calcul, sans jamais donner SQLite aux workers.
 - Remplacer sql.js par better-sqlite3 uniquement si une compilation native locale est acceptée (non retenu).
