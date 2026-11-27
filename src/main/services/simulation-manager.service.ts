@@ -9,13 +9,21 @@ import {
   type SimulationStatusView,
 } from '../../shared/simulation';
 import {
+  _resetComputeClientForTests,
+  cancelComputeForWorld,
+  computeCharacterTickInWorker,
+  shutdownComputeWorker,
+} from '../simulation/tick-compute-client.service';
+import {
+  commitTickResult,
   deleteWorld,
   getSimulationStatus,
+  listWorlds,
   pauseSimulation,
+  prepareTickInput,
   resumeSimulation,
   setSimulationSpeed,
   startSimulation,
-  stepSimulation,
   stopSimulation,
 } from './world-store.service';
 
@@ -32,6 +40,9 @@ type WorkerInMessage =
   | { type: 'stop'; worldId: string }
   | { type: 'step'; worldId: string }
   | { type: 'shutdown' };
+
+/** Marqueur interne : un tick automatique journalise ses erreurs, un step manuel les propage. */
+type TickOrigin = 'auto' | 'manual';
 
 let worker: Worker | null = null;
 let workerReadyPromise: Promise<void> | null = null;
@@ -87,7 +98,7 @@ async function ensureWorker(): Promise<void> {
       return;
     }
     if (message.type === 'tick') {
-      void handleTick(message.worldId);
+      void performTick(message.worldId, 'auto');
     }
   });
   worker.on('error', (error) => logSimulationError('worker-crash', error));
@@ -100,14 +111,21 @@ async function ensureWorker(): Promise<void> {
   await workerReadyPromise;
 }
 
-async function withWorldLock<T>(worldId: string, fn: () => Promise<T>): Promise<T> {
+interface WorldLockHandle {
+  worldId: string;
+  chained: Promise<void>;
+  release: () => void;
+  clearTimer: () => void;
+}
+
+/** Acquiert un verrou monde. L'attente est bornée ; le relâchement reste toujours possible. */
+async function acquireWorldLock(worldId: string): Promise<WorldLockHandle> {
   const previous = worldLocks.get(worldId) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  // La map doit stocker exactement la promesse comparée dans le `finally` :
-  // l'ancien code comparait `current` à `previous.then(() => current)`.
+  // La map stocke exactement la promesse comparée lors du relâchement.
   const chained = previous.then(() => current, () => current);
   worldLocks.set(worldId, chained);
 
@@ -118,12 +136,64 @@ async function withWorldLock<T>(worldId: string, fn: () => Promise<T>): Promise<
 
   try {
     await Promise.race([previous.then(() => undefined, () => undefined), timeout]);
-    return await fn();
-  } finally {
-    if (timer) clearTimeout(timer);
+  } catch (error) {
     release();
     if (worldLocks.get(worldId) === chained) worldLocks.delete(worldId);
+    throw error;
   }
+
+  return {
+    worldId,
+    chained,
+    release,
+    clearTimer: () => {
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
+
+function releaseWorldLock(handle: WorldLockHandle): void {
+  handle.clearTimer();
+  handle.release();
+  if (worldLocks.get(handle.worldId) === handle.chained) worldLocks.delete(handle.worldId);
+}
+
+async function withWorldLock<T>(worldId: string, fn: () => Promise<T>): Promise<T> {
+  const handle = await acquireWorldLock(worldId);
+  try {
+    return await fn();
+  } finally {
+    releaseWorldLock(handle);
+  }
+}
+
+/** Acquiert plusieurs verrous monde dans un ordre déterministe, puis les relâche en ordre inverse. */
+async function withWorldLocks<T>(worldIds: readonly string[], fn: () => Promise<T>): Promise<T> {
+  const ids = [...new Set(worldIds)].sort();
+  const handles: WorldLockHandle[] = [];
+  try {
+    for (const worldId of ids) handles.push(await acquireWorldLock(worldId));
+    return await fn();
+  } finally {
+    for (const handle of handles.reverse()) releaseWorldLock(handle);
+  }
+}
+
+/**
+ * Verrou monde pour toute opération IPC modifiant un monde existant, ses
+ * personnages ou ses instances. Ordre obligatoire : monde puis global.
+ */
+export async function withWorldMutationLock<T>(worldId: string, fn: () => Promise<T>): Promise<T> {
+  return withWorldLock(worldId, async () => {
+    if (deletedWorldIds.has(worldId)) throw new Error('Monde supprimé.');
+    return fn();
+  });
+}
+
+/** Verrou monde global pour une opération touchant des instances dans plusieurs mondes. */
+export async function withAllWorldLocks<T>(fn: () => Promise<T>): Promise<T> {
+  const { worlds } = await listWorlds();
+  return withWorldLocks(worlds.map((world) => world.id), fn);
 }
 
 function broadcastStatus(status: SimulationStatusView): void {
@@ -147,36 +217,52 @@ async function syncWorkerForStatus(status: SimulationStatusView): Promise<void> 
   postToWorker({ type: 'configure', worldId: status.worldId, speed: clock.speed, running });
 }
 
-async function handleTick(worldId: string): Promise<void> {
-  if (activeTickWorlds.has(worldId) || deletedWorldIds.has(worldId)) return; // anti double-tick
+/**
+ * Cycle complet d'un tick : snapshot court sous verrou global, calcul asynchrone
+ * dans le worker sous verrou monde seul, puis reprise du verrou global pour
+ * validation et écriture atomique. Aucun repli synchrone n'est prévu.
+ */
+async function performTick(worldId: string, origin: TickOrigin): Promise<SimulationStatusView | null> {
+  if (origin === 'auto' && (activeTickWorlds.has(worldId) || deletedWorldIds.has(worldId))) return null;
   activeTickWorlds.add(worldId);
   try {
-    // Le verrou du monde couvre le tick ET la synchronisation du worker : une
-    // suppression ne peut pas s'intercaler entre le COMMIT et le broadcast.
-    await withWorldLock(worldId, async () => {
-      if (deletedWorldIds.has(worldId)) return;
-      const current = await getSimulationStatus(worldId);
-      if (!current.clock) return;
-      if (normalizeWorldSimulationStatus(current.worldStatus) !== 'simulation_running' || current.clock.status !== 'running') {
-        return;
+    return await withWorldLock(worldId, async () => {
+      if (deletedWorldIds.has(worldId)) {
+        if (origin === 'manual') throw new Error('Monde supprimé.');
+        return null;
       }
-      const next = await stepSimulation(worldId);
-      if (deletedWorldIds.has(worldId)) return;
+      const current = await getSimulationStatus(worldId);
+      if (origin === 'auto') {
+        if (!current.clock) return null;
+        if (normalizeWorldSimulationStatus(current.worldStatus) !== 'simulation_running' || current.clock.status !== 'running') {
+          return null;
+        }
+      }
+
+      const { expected, input } = await prepareTickInput(worldId);
+      const response = await computeCharacterTickInWorker(input);
+      if (deletedWorldIds.has(worldId)) {
+        if (origin === 'manual') throw new Error('Monde supprimé.');
+        return null;
+      }
+      if (response.worldId !== expected.worldId || response.tick !== expected.tick) {
+        throw new Error('Réponse du worker de calcul incohérente avec le tick attendu.');
+      }
+
+      const next = await commitTickResult(worldId, expected, response.result);
+      if (deletedWorldIds.has(worldId)) {
+        if (origin === 'manual') throw new Error('Monde supprimé.');
+        return null;
+      }
       await syncWorkerForStatus(next);
       broadcastStatus(next);
+      return next;
     });
   } catch (error) {
+    if (origin === 'manual') throw error;
+    // Erreur automatique : journalisation seule, aucun état écrit ni statut diffusé.
     logSimulationError(`tick:${worldId}`, error);
-    try {
-      if (deletedWorldIds.has(worldId)) return;
-      await withWorldLock(worldId, async () => {
-        const status = await getSimulationStatus(worldId);
-        await syncWorkerForStatus(status);
-        broadcastStatus(status);
-      });
-    } catch {
-      // Ignore secondary failure.
-    }
+    return null;
   } finally {
     activeTickWorlds.delete(worldId);
   }
@@ -199,7 +285,7 @@ async function withWorldCommandLock(
 
 export async function simulationGetStatus(worldId: string): Promise<SimulationStatusView> {
   const status = await getSimulationStatus(worldId);
-  // Ne démarre pas le worker juste pour une lecture, sauf si simulation déjà active.
+  // Ne démarre pas le worker de calcul juste pour une lecture (arbitrage P7).
   if (status.isActive) await syncWorkerForStatus(status);
   return status;
 }
@@ -218,7 +304,9 @@ export async function simulationResume(worldId: string): Promise<SimulationStatu
 }
 
 export async function simulationStep(worldId: string): Promise<SimulationStatusView> {
-  return withWorldCommandLock(worldId, () => stepSimulation(worldId));
+  const next = await performTick(worldId, 'manual');
+  if (!next) throw new Error('Tick non appliqué.');
+  return next;
 }
 
 export async function simulationSetSpeed(worldId: string, speed: unknown): Promise<SimulationStatusView> {
@@ -230,14 +318,14 @@ export async function simulationStop(worldId: string): Promise<SimulationStatusV
 }
 
 /**
- * Suppression orchestrée d'un monde. L'ordre des verrous est strict :
- * verrou du monde (attend la fin du tick en cours) puis verrou global SQLite
- * pris par `deleteWorld`. Aucun tick tardif ne peut réécrire le monde supprimé.
+ * Suppression orchestrée d'un monde (arbitrage P5). Le tombeau et l'annulation
+ * des calculs pendants précèdent toute attente de verrou, afin qu'un timeout du
+ * verrou monde ne puisse jamais laisser une écriture tardive s'appliquer.
  */
 export async function simulationDeleteWorld(worldId: string): Promise<{ deleted: boolean }> {
+  deletedWorldIds.add(worldId);
+  cancelComputeForWorld(worldId);
   return withWorldLock(worldId, async () => {
-    // Tombeau permanent : les messages de tick déjà en file sont ignorés.
-    deletedWorldIds.add(worldId);
     if (worker) {
       try { postToWorker({ type: 'stop', worldId }); } catch { /* ignore */ }
     }
@@ -256,6 +344,7 @@ export async function shutdownSimulationManager(): Promise<void> {
   worker = null;
   workerReadyPromise = null;
   resolveWorkerReady = null;
+  await shutdownComputeWorker();
   activeTickWorlds.clear();
   worldLocks.clear();
 }
@@ -263,5 +352,19 @@ export async function shutdownSimulationManager(): Promise<void> {
 /** Test uniquement : réinitialise l'état module-level du manager. */
 export async function _resetSimulationManagerForTests(): Promise<void> {
   await shutdownSimulationManager();
+  await _resetComputeClientForTests();
   deletedWorldIds.clear();
+}
+
+/** Test uniquement : état observable des verrous et du tombeau. */
+export function _managerStateForTests(): {
+  deletedWorldIds: string[];
+  activeTickWorlds: string[];
+  worldLocks: string[];
+} {
+  return {
+    deletedWorldIds: [...deletedWorldIds],
+    activeTickWorlds: [...activeTickWorlds],
+    worldLocks: [...worldLocks.keys()],
+  };
 }

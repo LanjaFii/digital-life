@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/ipc';
 import type { CreateWorldInput } from '../../shared/world';
-import { simulationDeleteWorld } from '../services/simulation-manager.service';
+import { simulationDeleteWorld, withWorldMutationLock } from '../services/simulation-manager.service';
 import { createWorld, getWorld, listCharacters, listWorlds } from '../services/world-store.service';
 
 function asCreateInput(value: unknown): CreateWorldInput {
@@ -27,7 +27,8 @@ export function registerWorldIpc(): void {
   });
   ipcMain.handle(IPC_CHANNELS.WORLD_GET, (_event, id: unknown) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('Identifiant de monde invalide.');
-    return getWorld(id);
+    // getWorld() écrit `last_opened_at` : verrou monde avant le verrou global.
+    return withWorldMutationLock(id.trim(), () => getWorld(id.trim()));
   });
   ipcMain.handle(IPC_CHANNELS.CHARACTER_LIST, (_event, worldId: unknown) => {
     if (typeof worldId !== 'string' || !worldId.trim()) throw new Error('Identifiant de monde invalide.');

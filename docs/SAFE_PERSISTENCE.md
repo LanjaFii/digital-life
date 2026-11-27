@@ -16,14 +16,16 @@ après `COMMIT`. Trois défauts étaient vérifiés dans le code :
    que le disque conservait l'état précédent.
 
 La tranche 3D-B couvre la persistance, la restauration mémoire, les verrous et la
-suppression concurrente. Le calcul reste dans le main. Les tranches 3D-C1 et 3D-C2
-ont ajouté le protocole partagé et un worker de calcul autonome, mais celui-ci
-reste non branché : aucune écriture SQLite ni aucun `await` de calcul n'a été
-déplacé hors du main.
+suppression concurrente. Les tranches 3D-C1 et 3D-C2 ont ajouté le protocole
+partagé et le worker de calcul autonome. La tranche 3D-C3 a branché ce worker :
+le calcul est désormais asynchrone, mais SQLite, la validation et la persistance
+restent exclusivement dans le main.
 
-## 2. Séquence réelle d'un tick
+## 2. Séquence d'un tick
 
-L'ordre des verrous est strict : **verrou du monde puis verrou global SQLite**.
+L'ordre des verrous est strict : **verrou du monde puis verrou global SQLite**. Le bloc
+ci-dessous décrit la séquence historique 3D-B à titre de comparaison ; la séquence de
+production depuis 3D-C3 est donnée ensuite.
 
 ```text
 withWorldLock(worldId)                 // manager, couvre tout le tick
@@ -43,14 +45,14 @@ withWorldLock(worldId)                 // manager, couvre tout le tick
 fin withWorldLock
 ```
 
-Le calcul est synchrone dans le main en 3D-B : le verrou global reste donc détenu
-pendant cette section courte, mais jamais pendant un `await` externe. En 3D-C, le
-calcul deviendra asynchrone : le verrou global sera relâché pendant l'attente du
+Le calcul était synchrone dans le main en 3D-B : le verrou global restait détenu
+pendant cette section courte, mais jamais pendant un `await` externe. Depuis 3D-C3,
+le calcul est asynchrone : le verrou global est relâché pendant l'attente du
 worker, puis repris pour relire l'horloge et exporter `before` juste avant
 `BEGIN`. Un export pris avant une attente asynchrone écraserait les écritures
 d'autres mondes survenues pendant cette attente.
 
-Séquence d'intégration 3D-C3 prévue (non implémentée) :
+Séquence 3D-C3 implémentée (chemin de production) :
 
 ```text
 withWorldLock(worldId)                 // couvre tout le tick et toute écriture du monde
@@ -136,10 +138,11 @@ personnage, bibliothèque de modèles, `getWorld()` (qui écrit `last_opened_at`
 commandes de simulation, tick, helpers de test et suppression. Les lectures pures
 restent hors verrou.
 
-En 3D-C, toute opération IPC qui modifie un monde, ses personnages ou ses
-instances prendra également le **verrou du monde avant le verrou global**
+Depuis 3D-C3, toute opération IPC qui modifie un monde, ses personnages ou ses
+instances prend également le **verrou du monde avant le verrou global**
 (arbitrage P1). Cela couvre `WORLD_GET` (écriture de `last_opened_at`), les
-handlers `CHARACTER_CREATE/UPDATE/DELETE` et `TEMPLATE_INSTANTIATE`. Aucune
+handlers `CHARACTER_CREATE/UPDATE/DELETE`, `TEMPLATE_INSTANTIATE` et
+`TEMPLATE_DELETE` (verrous monde triés pour les instances réparties). Aucune
 écriture ciblant un monde ne peut intervenir pendant le calcul d'un tick de ce
 même monde.
 
@@ -163,7 +166,7 @@ supprimer et persister atomiquement, puis relâcher les verrous en ordre inverse
 Il n'existe pas encore de calcul asynchrone ni de `pendingComputes` : le tombeau
 suffit à invalider les signaux déjà en file.
 
-**3D-C3 (prévu, arbitrage P5)** : dès l'appel, **avant toute attente de verrous** :
+**3D-C3 (implémenté, arbitrage P5)** : dès l'appel, **avant toute attente de verrous** :
 
 1. poser le tombeau `deletedWorldIds` ;
 2. annuler les `pendingComputes` du monde : retirer les entrées de la map puis
@@ -233,9 +236,12 @@ Un temporaire résiduel n'est jamais fusionné ni importé.
 - manager : deux ticks du même monde, deux mondes distincts, suppression pendant
   tick, deux suppressions concurrentes, erreur sous verrou, absence de deadlock.
 
-Validation : 13 tests d'écriture atomique, 3 de file globale et 5 de manager, soit
-21 nouveaux tests ; suite hors benchmark/test long **264/264**, test long isolé **9/9**,
-typecheck 4 configs et build de production OK.
+Validation 3D-B : 13 tests d'écriture atomique, 3 de file globale et 5 de manager,
+soit 21 nouveaux tests ; suite hors benchmark/test long **264/264**, test long isolé
+**9/9**, typecheck 4 configs et build de production OK. Validation 3D-C3/C4 : le
+client de calcul apporte 10 tests, l'intégration manager/store/worker 7 tests et le
+verrou manager passe de 5 à 7 tests (timeout du calcul inclus) ; suite hors
+benchmark/tests longs **298/298**, typecheck 4 configs et build de production OK.
 
 ## 10. Limitation de performance
 
@@ -249,12 +255,12 @@ toujours toute la base, avec double copie mémoire et double SHA-256 ;
 comparable à effectif égal n'est disponible : ces chiffres ne prouvent pas une
 amélioration. Aucun timeout de test n'a été relevé artificiellement pour masquer
 ce coût ; le test long isolé passe en 6,00 s avec son délai explicite de 30 s.
-Le déplacement du calcul dans un worker (3D-C), l'IPC/UI (3D-D) et les
-optimisations (hash en flux, persistance groupée, rétention) restent ouverts.
+Le déplacement du calcul dans un worker a été livré en 3D-C3. L'IPC/UI (3D-D) et
+les optimisations (hash en flux, persistance groupée, rétention) restent ouverts.
 
 ## 11. Hors périmètre
 
 WAL natif, better-sqlite3, sauvegarde automatique périodique, export/import par
 monde, compression générale de la base, chiffrement, déplacement de SQLite dans
-un worker. L'annulation de `pendingComputes` est hors périmètre de **3D-B** et
-prévue en **3D-C3** (arbitrage P5).
+un worker. L'annulation de `pendingComputes`, hors périmètre de **3D-B**, a été
+livrée en **3D-C3** (arbitrage P5).

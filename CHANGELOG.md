@@ -2,6 +2,33 @@
 
 Format : entrées datées, catégories Added / Changed / Fixed / Removed / Technical decisions.
 
+## 2026-11-27 — Phase 3D-C3 et 3D-C4 (worker branché, intégration et clôture)
+
+### Added
+- `src/main/simulation/tick-compute-client.service.ts` : client isolé du worker de calcul, création paresseuse pour un calcul uniquement, `pendingComputes` corrélés par `requestId` monotone `compute-n`, timeout fixe 30 s, retrait avant rejet, doublons et réponses tardives ignorés, checksum recalculé, gestion `ready`/`error`/`exit`, annulation par monde et recréation paresseuse ; entrée copiée par `structuredClone`, aucun SQLite/IPC/renderer/état résiduel.
+- `src/main/services/world-store.service.ts` : `writeCalculatedTick()` partagé, `prepareTickInput()` et `commitTickResult()` avec relecture d'horloge, validation `expected` et `before` repris sous verrou global ; `stepSimulation()` conservé comme référence synchrone de test.
+- Tests : `tests/compute-worker-test-helpers.ts`, `tests/tick-compute-client.test.ts` (10), `tests/simulation-manager-lock.test.ts` (7 dont timeout), `tests/simulation-worker-integration.test.ts` (7).
+
+### Changed
+- `src/main/services/simulation-manager.service.ts` : `performTick(worldId, origin)` orchestre préparation, calcul et commit ; verrou monde → global avec relâchement du global pendant l'attente, anti-double-tick, erreur `manual` propagée, erreur `auto` journalisée sans écriture ni broadcast ; suppression avec tombeau et annulation avant verrous ; helpers de verrou exportés.
+- `src/main/ipc/world.ipc.ts`, `src/main/ipc/character.ipc.ts` : arbitrage P1 appliqué à `WORLD_GET`, au CRUD personnage et aux instances de template, avec ordre monde → global.
+- `src/main/simulation/tick-compute.worker.ts` : statut mis à jour (branché en 3D-C3).
+- `PROGRESS.md`, `HANDOFF.md`, `README.md`, `CHANGELOG.md`, `docs/PHASE_3D_DESIGN.md`, `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md` : état réel 3D-C3/C4, compteurs de validation et divergence `worldLocks` résolue.
+
+### Fixed
+- Divergence documentaire `docs/PHASE_3D_DESIGN.md:248` sur la portée du verrou monde ; mentions « non branché » et « 3D-C3 planifiée » remplacées dans la documentation concernée.
+- Aucun tick partiel, snapshot obsolète ni écriture après annulation/timeout : le commit relit l'horloge et valide `expected` sous verrou, après la réponse du worker.
+
+### Removed
+- Aucune fonctionnalité existante ; aucun repli synchrone silencieux introduit.
+
+### Technical decisions
+- Le calcul de production passe exclusivement par le worker via le client isolé ; `simulationGetStatus()` ne crée jamais le worker de calcul et le planificateur reste inchangé.
+- P1/P2/P3/P5/P6/P7/P8 conservés : verrou monde étendu, checksum = noyau Golden Hash sans `decisionRecords`, modules partagés purs, tombeau/annulation avant verrous, origine `auto`/`manual`, séparation planner/compute, timeout fixe 30 s.
+- Aucun changement de schéma SQLite, PRNG, règles de décision, UI, LLM ni données utilisateur.
+- Validations séquentielles : check-deps OK, typecheck 4 configs OK, ciblés 57/57, suite complète 298/298 (32 fichiers, benchmark et tests longs exclus), Golden Hash 18/18, matrice longue 96/96, simulation longue 9/9, build OK. Aucun benchmark lancé, aucun `GENERATE_GOLDEN_MATRIX`, aucun scénario 50/100 supplémentaire.
+- Avis indépendant : la mission s'arrête après 3D-C4 ; ne pas démarrer 3D-D (IPC de lecture et inspecteur UI) sans validation explicite distincte.
+
 ## 2026-11-26 — Phase 3D-C1 et 3D-C2 (protocole et worker non branché)
 
 ### Added

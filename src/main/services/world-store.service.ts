@@ -29,7 +29,11 @@ import {
   type CharacterActionRuntime,
 } from '../../shared/action';
 import type { DecisionRecordPayloadV1, DecisionRecordV1 } from '../../shared/decision';
-import type { CharacterTickSnapshot } from '../../shared/simulation-rules';
+import type {
+  CharacterTickInput,
+  CharacterTickResult,
+  CharacterTickSnapshot,
+} from '../../shared/simulation-rules';
 import { computeCharacterTick } from './character-tick.service';
 import {
   countDecisionRecords,
@@ -74,6 +78,20 @@ import {
  * Jamais utilisé en production (aucun appel hors tests).
  */
 let tickFailureForTests: (() => void) | null = null;
+
+/**
+ * État attendu du tick calculé hors du main. Le verrou du monde garantit qu'aucune
+ * écriture ciblant ce monde ne peut survenir entre la préparation et la validation.
+ */
+export interface TickExpectation {
+  worldId: string;
+  /** Tick calculé (horloge lue + 1). */
+  tick: number;
+  day: number;
+  hour: number;
+  /** uint32 lu avant le calcul, comparé à l'horloge relue avant toute écriture. */
+  rngState: number;
+}
 
 function rowToWorld(row: Record<string, unknown>): WorldSummary {
   const mode = row.generation_mode === 'random' ? 'random' : 'empty';
@@ -952,10 +970,44 @@ function loadTickSnapshots(
 }
 
 /**
+ * Écrit un résultat déjà calculé dans la transaction courante. Toutes les
+ * validations de cohérence sont effectuées avant la première écriture SQL.
+ * Partagé par le chemin direct de référence et par le chemin worker.
+ */
+function writeCalculatedTick(
+  db: Database,
+  worldId: string,
+  prev: SimulationClock,
+  result: CharacterTickResult,
+  expected: TickExpectation,
+): void {
+  const states = buildTickStates(result);
+  assertDecisionRecordsMatchTick(result.decisionRecords, states);
+  for (const decision of result.decisions) {
+    if (decision.worldId !== expected.worldId || decision.tick !== expected.tick ||
+        decision.day !== expected.day || decision.hour !== expected.hour) {
+      throw new Error('Explication de décision incohérente avec le tick attendu.');
+    }
+  }
+
+  const now = new Date().toISOString();
+  writeTickCharacterStates(db, states, now);
+  const inserted = writeTickDecisionHistory(db, result.decisionRecords, now);
+  if (inserted !== states.length) {
+    throw new Error('Écriture incomplète de l’historique des décisions.');
+  }
+  if (tickFailureForTests) tickFailureForTests();
+
+  upsertClock(db, buildNextClock(prev, expected.tick, expected.day, expected.hour, result.rngState, now));
+  setWorldStatus(db, worldId, prev.status === 'running' ? 'simulation_running' : 'simulation_paused', now);
+}
+
+/**
  * Applique exactement un tick : évolution passive, décisions autonomes, effets
  * d'action, runtime et avance de l'horloge dans une seule transaction SQLite et
- * une seule persistance atomique. Le PRNG n'est consommé qu'en cas d'ex æquo
- * réel. Aucun effet partiel en cas d'erreur.
+ * une seule persistance atomique. Chemin de référence Phase 3C, conservé pour
+ * les tests de parité : la production utilise désormais le worker via
+ * `prepareTickInput()` / `commitTickResult()`.
  */
 export async function stepSimulation(worldId: string): Promise<SimulationStatusView> {
   return withDbWrite(async () => {
@@ -980,6 +1032,13 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
         const { snapshots, actionRuntimeByCharacter, characterNameByCharacterId } = loadTickSnapshots(db, id);
         const nextTick = prev.tick + 1;
         const { day, hour } = deriveDayHour(nextTick);
+        const expected: TickExpectation = {
+          worldId: id,
+          tick: nextTick,
+          day,
+          hour,
+          rngState: prev.rngState >>> 0,
+        };
 
         // Calcul purement mémoire : aucun état n'est modifié avant cette étape.
         const result = computeCharacterTick({
@@ -995,22 +1054,98 @@ export async function stepSimulation(worldId: string): Promise<SimulationStatusV
           characterNameByCharacterId,
         });
 
-        const states = buildTickStates(result);
-        assertDecisionRecordsMatchTick(result.decisionRecords, states);
-
-        const now = new Date().toISOString();
-        writeTickCharacterStates(db, states, now);
-        const inserted = writeTickDecisionHistory(db, result.decisionRecords, now);
-        if (inserted !== states.length) {
-          throw new Error('Écriture incomplète de l’historique des décisions.');
-        }
-
-        if (tickFailureForTests) tickFailureForTests();
-
-        upsertClock(db, buildNextClock(prev, nextTick, day, hour, result.rngState, now));
-        setWorldStatus(db, id, prev.status === 'running' ? 'simulation_running' : 'simulation_paused', now);
+        writeCalculatedTick(db, id, prev, result, expected);
       });
       return getSimulationStatus(id);
+  });
+}
+
+/**
+ * Prépare une entrée de tick immuable sous le verrou global court. Aucune
+ * transaction n'est ouverte et aucune donnée n'est modifiée : le verrou global
+ * est relâché dès le retour, avant l'attente du worker de calcul.
+ */
+export async function prepareTickInput(worldId: string): Promise<{
+  expected: TickExpectation;
+  input: CharacterTickInput;
+}> {
+  return withDbWrite(async () => {
+    const id = assertValidWorldId(worldId);
+    const db = await getDb();
+    const world = getWorldOrThrow(db, id);
+    const status = normalizeWorldSimulationStatus(world.status);
+    const preflightClock = getSimulationClockRow(db, id);
+    if (!preflightClock || (status !== 'simulation_running' && status !== 'simulation_paused')) {
+      throw new Error('La simulation doit être démarrée pour exécuter un tick.');
+    }
+
+    const prev = clockRowToClock(preflightClock);
+    const { snapshots, actionRuntimeByCharacter, characterNameByCharacterId } = loadTickSnapshots(db, id);
+    const nextTick = prev.tick + 1;
+    const { day, hour } = deriveDayHour(nextTick);
+    const expected: TickExpectation = {
+      worldId: id,
+      tick: nextTick,
+      day,
+      hour,
+      rngState: prev.rngState >>> 0,
+    };
+    const input: CharacterTickInput = {
+      worldId: id,
+      tick: nextTick,
+      day,
+      hour,
+      seed: simulationSeed(world.seed),
+      rngState: prev.rngState >>> 0,
+      characters: snapshots,
+      params: DEFAULT_SIMULATION_PARAMETERS,
+      actionRuntimeByCharacter,
+      characterNameByCharacterId,
+    };
+    return { expected, input };
+  });
+}
+
+/**
+ * Reprend le verrou global, valide que l'horloge n'a pas changé pendant le
+ * calcul, puis écrit le résultat dans une transaction courte et une persistance
+ * atomique. `before` est exporté ici, après la reprise du verrou : un export
+ * pris avant l'attente écraserait les écritures concurrentes des autres mondes.
+ */
+export async function commitTickResult(
+  worldId: string,
+  expected: TickExpectation,
+  result: CharacterTickResult,
+): Promise<SimulationStatusView> {
+  return withDbWrite(async () => {
+    const id = assertValidWorldId(worldId);
+    const db = await getDb();
+    const world = getWorldOrThrow(db, id);
+    const status = normalizeWorldSimulationStatus(world.status);
+    const clockRow = getSimulationClockRow(db, id);
+    if (!clockRow || (status !== 'simulation_running' && status !== 'simulation_paused')) {
+      throw new Error('La simulation doit être démarrée pour valider un tick.');
+    }
+    const prev = clockRowToClock(clockRow);
+    if (prev.worldId !== expected.worldId || prev.tick + 1 !== expected.tick ||
+        (prev.rngState >>> 0) !== (expected.rngState >>> 0)) {
+      throw new Error('L’horloge a changé pendant le calcul du tick.');
+    }
+    if (result.worldId !== expected.worldId || result.tick !== expected.tick) {
+      throw new Error('Résultat de tick incohérent avec la requête.');
+    }
+
+    const before = snapshotDatabaseFromDisk();
+    await runDbTransaction(db, before, () => {
+      const currentRow = getSimulationClockRow(db, id);
+      if (!currentRow) throw new Error('Horloge de simulation introuvable pendant le tick.');
+      const current = clockRowToClock(currentRow);
+      if (current.tick + 1 !== expected.tick || (current.rngState >>> 0) !== (expected.rngState >>> 0)) {
+        throw new Error('L’horloge a changé pendant la transaction du tick.');
+      }
+      writeCalculatedTick(db, id, current, result, expected);
+    });
+    return getSimulationStatus(id);
   });
 }
 

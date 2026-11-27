@@ -7,10 +7,11 @@
 > La tranche 3D-A ajoute uniquement l'historique technique : aucun IPC, preload, UI,
 > worker, verrou global ni changement de persistance fichier n'est concerné.
 >
-> **Statut : tranches 3D-A, 3D-B, 3D-C1 et 3D-C2 implémentées et validées.** Le calcul Phase 3C
+> **Statut : tranches 3D-A à 3D-C4 implémentées et validées.** Le calcul Phase 3C
 > reste byte-identique à entrées égales (18 Golden Hash inchangés, matrice étendue 96/96 en test
-> long isolé). La suite passe 279/279 (hors tests longs et benchmark), typecheck des quatre
-> configurations et build réussis. L'intégration 3D-C3 et les tranches 3D-C4/3D-D restent à faire.
+> long isolé), y compris via le worker branché en 3D-C3. La suite complète passe 298/298
+> (32 fichiers, hors tests longs et benchmark), typecheck des quatre configurations et build
+> réussis. La tranche 3D-D reste à faire.
 
 ## 1. Deux notions distinctes
 

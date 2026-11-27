@@ -1,11 +1,10 @@
 # Protocole de calcul du tick dans un worker — Phase 3D-C
 
-> **Arbitrages définitifs validés le 2026-11-26 ; 3D-C1 et 3D-C2 implémentées et validées.**
-> Les contrats, validateurs et le worker autonome existent, mais **le worker n'est pas branché
-> sur la production** : le calcul reste synchrone dans le main jusqu'à 3D-C3, qui exige une
-> validation explicite distincte. Le worker actuel `simulation.worker.ts` reste un planificateur
-> de ticks : il ne calcule aucune règle métier et n'ouvre aucune base SQLite.
-> `docs/PHASE_3D_DESIGN.md` §2.1 et §10 font autorité.
+> **Arbitrages définitifs validés le 2026-11-26 ; tranches 3D-C1 à 3D-C4 implémentées et
+> validées.** Le worker de calcul est branché sur la production depuis 3D-C3 via le client
+> isolé `src/main/simulation/tick-compute-client.service.ts`. Le worker actuel
+> `simulation.worker.ts` reste un planificateur de ticks : il ne calcule aucune règle métier
+> et n'ouvre aucune base SQLite. `docs/PHASE_3D_DESIGN.md` §2.1 et §10 font autorité.
 
 ## 1. Architecture retenue
 
@@ -16,7 +15,7 @@ Deux workers aux responsabilités séparées :
 | Planificateur | `src/main/simulation/simulation.worker.ts` | `setInterval` par monde, signaux `tick`, vitesse | aucun |
 | Calcul | `src/main/simulation/tick-compute.worker.ts` | `computeCharacterTick()` et règles pures uniquement | aucun |
 
-Le second worker est ajouté en 3D-C2 sous forme de module autonome, sans branchement. Le premier n'est pas modifié dans son principe. Le main reste propriétaire de SQLite et de la validation finale. Le calcul direct Phase 3C reste le chemin de production jusqu'à 3D-C3 : aucun mode hybride ni repli silencieux n'est accepté.
+Le second worker a été ajouté en 3D-C2 sous forme de module autonome, puis branché en 3D-C3 par un client dédié qui gère son cycle de vie et les requêtes en attente. Le premier n'est pas modifié dans son principe. Le main reste propriétaire de SQLite et de la validation finale. Le calcul direct Phase 3C n'est plus le chemin de production : il subsiste uniquement comme référence de test, sans mode hybride ni repli silencieux.
 
 ```mermaid
 sequenceDiagram
@@ -86,7 +85,7 @@ type ComputeTickResponse =
 - `requestId` est généré par un compteur local du manager : `compute-1`, `compute-2`, …
 - Aucun UUID n'est utilisé : il n'est pas nécessaire et il n'apporterait qu'une dépendance à un aléa non simulé.
 - Le compteur n'est pas persisté : il sert uniquement à corréler les messages de la session courante.
-- `pendingComputes: Map<string, PendingCompute>` associe `requestId` à `{ input, expected, resolve, reject, timer }`.
+- `pendingComputes: Map<string, PendingCompute>` associe `requestId` à `{ worldId, resolve, reject, timer }`. Le client ne conserve ni `input` ni `expected` : le manager garde `expected` localement et le passe à la validation d'écriture.
 - `expected = { worldId, tick, day, hour, rngState }` : `tick = clock.tick + 1`, `day`/`hour` étant **dérivés de ce tick** par `deriveDayHour()` (et non de l'ancienne ligne d'horloge), et `rngState = clock.rngState` lu avant le calcul. `CharacterTickResult` ne porte pas `day`/`hour` : la validation compare l'enveloppe, l'`input`, les `explanation` et l'horloge relue (§4).
 - Le verrou du monde reste actif pendant tout le tick et couvre toute écriture ciblant ce monde (arbitrage P1). L'ordre est toujours **monde → global** : le verrou global est pris pour lire le snapshot puis relâché avant `compute-tick` ; il est repris après la réponse pour relire l'horloge, valider `expected`, exporter `beforeBuffer`, écrire et persister.
 - Plusieurs mondes peuvent avoir des requêtes en attente ; le worker de calcul unique les traite séquentiellement dans son event loop. Le main corrèle exclusivement par `requestId`.
@@ -136,7 +135,7 @@ Les trois délais de 30 s (attente du verrou du monde, file d'écriture globale,
 2. les requêtes en attente de l'ancienne génération sont déjà rejetées et retirées de la map ;
 3. aucun état SQLite n'est réécrit automatiquement ;
 4. les clocks `running` restent inchangés : la planification existante continue d'envoyer des signaux ;
-5. `ensureComputeWorker()` est appelé au prochain signal `tick` ou à la prochaine commande active nécessitant un calcul, jamais par `simulationGetStatus()` (arbitrage P7) ;
+5. `computeCharacterTickInWorker()` crée le worker paresseusement au prochain signal `tick` ou au prochain `step` manuel, jamais par `simulationGetStatus()` (arbitrage P7) ;
 6. si le worker de calcul meurt alors qu'aucune requête n'est en attente, aucune action utilisateur n'est requise.
 
 Cette politique évite un double tick : une panne ne déclenche ni rejeu ni compensation invisible. Le worker planificateur et le worker de calcul ont des durées de vie strictement distinctes.
@@ -181,7 +180,7 @@ Trois notions restent distinctes :
 - absence d'état résiduel entre deux requêtes ;
 - checksum conforme au noyau du §7, avec `decisionRecords` exclu.
 
-**Intégration manager — prévue en 3D-C3**
+**Intégration manager — réalisée en 3D-C3**
 
 - corrélation par `requestId`, doublons, réponses tardives, timeout ;
 - retrait de l'entrée `pending` avant rejet, puis ignorance de la réponse tardive ;
@@ -191,7 +190,7 @@ Trois notions restent distinctes :
 - propagation d'erreur : `step` manuel rejeté, tick automatique journalisé sans écriture ;
 - Golden Hash : 18 scénarios en suite ordinaire, matrice complète en test long isolé.
 
-**Electron [Planifié 3D-C3/3D-D]**
+**Electron [Planifié 3D-D — UI inchangée en 3D-C]**
 
 - step manuel, start/pause/resume à 1x/10x ;
 - aucun blocage visible pendant un tick avec 50 personnages ;

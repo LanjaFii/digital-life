@@ -1,5 +1,5 @@
 /**
- * Worker de calcul du tick (Phase 3D-C2), non branché sur la production.
+ * Worker de calcul du tick (Phase 3D-C2, branché en 3D-C3).
  *
  * Responsabilités : valider l'enveloppe, exécuter les règles pures
  * `computeCharacterTick()`, calculer le checksum du noyau Golden Hash et

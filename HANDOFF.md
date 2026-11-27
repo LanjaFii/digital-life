@@ -3,8 +3,8 @@
 ## Où en est le développement
 
 - **Branche** : `main`, remote `git@github.com:LanjaFii/digital-life.git`.
-- **HEAD avant implémentation 3D-C1/C2** : `d900ecd908aac01c10c947d8abd1e4d758f2a235`, identique à `origin/main` au début de la tranche ; le commit de livraison est décrit dans `CHANGELOG.md`.
-- **Tranche courante** : **Phase 3D-C1 et 3D-C2 implémentées et validées** (protocole versionné, canonicalisation partagée, frontière d'écriture extraite, worker de calcul autonome non branché). 3D-C3 (intégration/verrous), 3D-C4 (documentation finale) et 3D-D (IPC/UI) restent non implémentées et exigent une validation explicite distincte. Le calcul de production reste synchrone dans le main : aucun manager, IPC, preload, renderer, schéma, PRNG, Golden Hash ni appel LLM modifié.
+- **HEAD avant implémentation 3D-C1/C2** : `d900ecd908aac01c10c947d8abd1e4d758f2a235` ; HEAD avant intégration 3D-C3/C4 : `c3a6232f70d830ca9adea311ee50377eb185b48d`, identique à `origin/main` au début de la tranche ; le commit de livraison est décrit dans `CHANGELOG.md`.
+- **Tranche courante** : **Phases 3D-C1 à 3D-C4 implémentées et validées** (protocole versionné, canonicalisation partagée, frontière d'écriture extraite, worker de calcul branché, intégration manager/verrous/annulation, documentation finale). Livraison par commit et push sans force sur `origin/main` effectuée dans cette tranche. 3D-D (IPC de lecture et inspecteur UI) reste non implémentée et exige une validation explicite distincte. Le calcul de production passe par le worker via le client isolé, sans repli synchrone ; l'ordonnancement et la persistance restent dans le main.
 - **État moteur réel** : horloge/PRNG sérialisable, tick SQLite atomique, évolution passive
   déterministe des 8 besoins et 10 émotions **puis** objectifs immédiats, scoring, décision,
   effets numériques et runtime persistés. Les artefacts du résultat (`decisions`,
@@ -132,9 +132,18 @@
 - `src/shared/canonicalization.ts` (nouveau) : `canonicalize()` stricte (Decision Records) et `canonicalizeGolden()` historique, `extractGoldenTickCore()`, `canonicalizeGoldenTickResult()` (checksum sans `decisionRecords`) et `collectRuleIds()`. Les 18 Golden Hash restent byte-identiques.
 - `src/shared/decision-validation.ts` (nouveau) + `decision-record.service.ts` : validateurs et limites déplacés dans le module pur ; réexports publics inchangés. `ACTION_REGISTRY_VERSION`, `SIMULATION_PARAMETERS_VERSION`, `TICK_DELTA_CAUSE_KINDS` et `DECISION_PARAMETER_KEYS` deviennent les sources uniques des versions et listes.
 - `src/main/services/tick-writer.service.ts` (nouveau) : `buildTickStates()`, `assertDecisionRecordsMatchTick()`, `writeTickCharacterStates()`, `writeTickDecisionHistory()`, `buildNextClock()`, `upsertClock()`, `setWorldStatus()`. `stepSimulation()` délègue sans changer l'ordre transactionnel ni les hooks `_...ForTests`.
-- `src/main/simulation/tick-compute.worker.ts` (nouveau) : `handleComputeTickMessage()` pur, `computeTickChecksum()`, `createComputeWorkerReady()`, `uncorrelatedError()`. Le worker envoie `ready`, valide chaque requête/réponse, calcule via `computeCharacterTick()` inchangé, ne garde aucun état, n'ouvre ni SQLite ni fichier, n'utilise ni IPC ni horloge murale ni `Math.random()`. **Non branché sur la production** : aucun mode hybride ni repli synchrone silencieux.
+- `src/main/simulation/tick-compute.worker.ts` (nouveau) : `handleComputeTickMessage()` pur, `computeTickChecksum()`, `createComputeWorkerReady()`, `uncorrelatedError()`. Le worker envoie `ready`, valide chaque requête/réponse, calcule via `computeCharacterTick()` inchangé, ne garde aucun état, n'ouvre ni SQLite ni fichier, n'utilise ni IPC ni horloge murale ni `Math.random()`. Branché sur la production en 3D-C3 via le client dédié, sans mode hybride ni repli synchrone silencieux.
 - Tests : `tests/worker-tick-protocol.test.ts` (8), `tests/tick-writer.test.ts` (4), `tests/worker-tick-parity.test.ts` (3, harnais `worker_threads` sur le bundle), `tests/decision-golden-hash.test.ts` (18, source canonique partagée), `tests/worker-tick-golden-matrix.long.test.ts` (96 scénarios figés en test long isolé), `tests/worker-tick-fixtures.ts`.
-- **Limite assumée** : la résolution du chemin du second worker et le harnais d'injection ne vivent que dans les tests ; aucune gestion de `pendingComputes`, timeout, doublons, `error`/`exit` ni annulation n'est implémentée avant 3D-C3.
+- **Limite historique 3D-C1/C2 résolue en 3D-C3** : la résolution du chemin du worker, `pendingComputes`, timeout, doublons, `error`/`exit` et annulation sont désormais implémentés dans `tick-compute-client.service.ts`.
+
+## Ce qui vient d'être réalisé (Phase 3D-C3 intégration et 3D-C4 clôture)
+
+- `src/main/simulation/tick-compute-client.service.ts` (nouveau) : création paresseuse du worker pour un calcul uniquement, registre des `pendingComputes` avec `requestId`, `worldId`, minuteur et promesses, timeout fixe 30 s, retrait avant rejet, doublons et réponses tardives ignorés, recalcul du checksum, `ready`/`error`/`exit`, annulation par monde et recréation paresseuse. Entrée copiée par `structuredClone`, aucun SQLite/IPC/renderer/état résiduel, aucune consultation de statut ne crée le worker.
+- `src/main/services/world-store.service.ts` : `writeCalculatedTick()` partagé, `stepSimulation()` conservé comme référence de test, `prepareTickInput()` et `commitTickResult()` avec relecture d'horloge et `before` repris sous verrou global, validation `expected`, transaction courte et persistance atomique, sans `withDbWrite()` imbriqué.
+- `src/main/services/simulation-manager.service.ts` : `performTick(worldId, origin)` orchestre préparation, calcul asynchrone et commit ; verrou monde → global avec relâchement du global pendant l'attente ; erreur `manual` propagée à l'IPC, erreur `auto` journalisée sans écriture ni broadcast ; suppression = tombeau et annulation avant tout verrou (P5) ; helpers `withWorldMutationLock()` / `withAllWorldLocks()` exportés.
+- `src/main/ipc/world.ipc.ts` et `src/main/ipc/character.ipc.ts` : P1 appliqué à `WORLD_GET`, au CRUD personnage et aux instances de template ; ordre des verrous monde → global, y compris suppressions triées.
+- Tests : `tests/compute-worker-test-helpers.ts` (nouveau), `tests/tick-compute-client.test.ts` (10), `tests/simulation-manager-lock.test.ts` (7), `tests/simulation-worker-integration.test.ts` (7) ; couverture timeout, duplicates, tardives, `error`/`exit`, recréation, suppression concurrente, mutations IPC, rollback, redémarrage, erreurs `manual`/`auto`, ordre des verrous et absence de deadlock.
+- Documentation : `README.md`, `PROGRESS.md`, `HANDOFF.md`, `CHANGELOG.md`, `docs/PHASE_3D_DESIGN.md` (divergence `worldLocks` résolue), `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_HISTORY_SYSTEM.md`, `docs/ARCHITECTURE.md`, `docs/SIMULATION_ENGINE.md`, `docs/SIMULATION_TIME_AND_ENGINE.md`.
 
 ## Décisions de conception Phase 3C
 
@@ -167,13 +176,13 @@
 
 ## Décisions Phase 3D (validées ; 3D-A et 3D-B implémentées)
 
-- **Ordre des tranches** : 3D-A historique (**livrée**) → 3D-B persistance/verrous (**livrée**) → 3D-C1 fondations (**livrée**) → 3D-C2 worker non branché (**livrée**) → 3D-C3 intégration/verrous → 3D-C4 documentation finale → 3D-D IPC/UI. Chaque tranche encore à venir exige une validation explicite distincte.
+- **Ordre des tranches** : 3D-A historique (**livrée**) → 3D-B persistance/verrous (**livrée**) → 3D-C1 fondations (**livrée**) → 3D-C2 worker autonome (**livrée**) → 3D-C3 intégration/verrous (**livrée**) → 3D-C4 documentation finale (**livrée**) → 3D-D IPC/UI (à venir). Chaque tranche encore à venir exige une validation explicite distincte.
 - **Décisions ouvertes résolues** (ex-§10 de `docs/PHASE_3D_DESIGN.md`) : aucune purge automatique ; aucun export/archivage en 3D-A ; timeout worker futur fixé à 30 s sans implémentation ; `engineVersion = 'phase3d.1'` avec stratégie de versionnement documentée (mineur pour changement de forme, ajout aux versions acceptées par le lecteur, aucun réécriture des anciens enregistrements).
-- **Workers** : le planificateur existant reste inchangé ; un second worker calcule tout le tick ou aucun hybride n'est accepté.
+- **Workers** : le planificateur existant reste inchangé ; le second worker calcule tout le tick via le client isolé, sans hybride ni repli synchrone.
 - **SQLite** : main seul propriétaire. Historique complet compressé, `UNIQUE(world_id, tick, character_id)`, FK monde en cascade, aucune FK vers `characters`.
 - **Atomicité** : verrou global repris après le calcul, relecture de l'horloge, `beforeBuffer` avant `BEGIN`, transaction courte, `afterBuffer`, `temp + fsync + SHA-256 + rename`, restauration mémoire si une étape échoue.
-- **Verrous** : ordre unique monde → global ; en 3D-B le verrou monde couvre tick/sync/broadcast et commandes, le verrou global couvre les accès SQLite et la persistance. Le nettoyage de `worldLocks` est corrigé et `WORLD_DELETE` passe par `simulationDeleteWorld()`. En 3D-C, le verrou global sera relâché pendant l'attente du worker puis repris pour relire l'horloge et exporter `before` juste avant `BEGIN`.
-- **Erreurs worker** : step manuel rejette l'IPC ; tick automatique journalise sans écrire ; aucun rejeu automatique ni double tick.
+- **Verrous** : ordre unique monde → global ; le verrou monde couvre tick/sync/broadcast et commandes, le verrou global couvre les accès SQLite et la persistance. Le nettoyage de `worldLocks` est corrigé et `WORLD_DELETE` passe par `simulationDeleteWorld()`. Depuis 3D-C3, le verrou global est relâché pendant l'attente du worker puis repris pour relire l'horloge et exporter `before` juste avant `BEGIN`.
+- **Erreurs worker** : step manuel rejette l'IPC ; tick automatique journalise sans écrire ni changement de statut ; aucun rejeu automatique ni double tick.
 - **UI** : deux canaux de lecture, `limit <= 500`, throttle 500 ms, jeton de requête, aucune API Node dans le renderer.
 - **Golden Hash** : comparaison obligatoire entre référence Phase 3C et worker sur plusieurs seeds, 6 profils, 1/2/10/50 personnages et 24/72/168/720 ticks.
 
@@ -262,6 +271,16 @@
 - `bash scripts/build.sh` : OK (2 145 modules, WASM copié, check-deps intégré) ; `dist/main/simulation/tick-compute.worker.js` présent et utilisé par le harnais de parité.
 - Aucune simulation longue 3B ni benchmark rejoué : aucun changement de règle, PRNG, schéma ni persistance. Aucune donnée utilisateur réelle lue ni modifiée ; aucun secret ajouté au diff.
 
+## Validation réalisée (Phase 3D-C3 intégration / 3D-C4 clôture)
+
+- `.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/check-deps.mjs` : OK (Node local, modules npm, binaire Electron, WASM).
+- `.tools/node/versions/v26.13.1-linux-x64/bin/node scripts/typecheck.mjs` : OK (4 tsconfigs).
+- Ciblés : 7 fichiers, **57/57 OK** (protocole 8, tick-writer 4, parité 3, client worker 10, verrou manager 7, intégration 7, Golden Hash 18).
+- Suite complète séquentielle (`--maxWorkers=1 --no-file-parallelism`, benchmark et tests longs exclus) : **298/298 OK** (32 fichiers), 74,76 s.
+- Matrice Golden Hash longue isolée : **96/96 OK** en 158,84 s. Simulation longue 3B isolée : **9/9 OK** en 5,59 s (frontière d'écriture partagée, donc rejouée).
+- `bash scripts/build.sh` : OK (2 145 modules, WASM copié, check-deps intégré). Aucun benchmark lancé, aucun scénario 50/100 supplémentaire, aucune variable `GENERATE_GOLDEN_MATRIX`.
+- Contrôle environnement après validations : aucun processus Node/Vitest/Electron résiduel, 6 508 MiB disponibles, swap 0, charge 1,25. Aucune donnée utilisateur réelle lue ni modifiée, aucun secret ajouté.
+
 ## Problèmes / points d'attention
 
 - `simulation_stopped` reste terminal pour `start/resume` : ne pas contourner cette garde
@@ -278,9 +297,9 @@
   et colonnes de contrôle. Aucune purge automatique, aucun backfill et aucun export : les
   ticks antérieurs à la migration restent sans historique.
 - Le verrou global d'écriture et la persistance atomique sont **implémentés** ; le worker de
-  calcul existe depuis 3D-C2 mais est **non branché**. Le calcul est toujours synchrone dans
-  le main, donc le verrou global reste détenu pendant le tick : ne pas supposer que 3D-C3
-  existe déjà. Aucun repli synchrone silencieux n'est prévu lors de l'intégration.
+  calcul est branché depuis 3D-C3 via le client isolé. Le calcul de production est asynchrone
+  et le verrou global est relâché pendant l'attente ; `stepSimulation()` n'est plus qu'une
+  référence de test. Aucun repli synchrone silencieux n'est prévu ni implémenté.
 - **Performance** : `persist()` réexporte toute la base à chaque tick ; avec l'historique, le
   coût par tick croît avec le nombre d'enregistrements (3D-A : ~52 ms à ~157 ms pour
   3 personnages entre les ticks 25 et 200 ; benchmarks 3D-B locaux : 63,68 ms au tick 10,
@@ -289,10 +308,9 @@
   à effectif égal : ne pas en déduire une amélioration. Le test long concerné a un délai
   explicite de 30 s, il passe en 6,00 s isolément. Ne pas monter en charge sans optimisations
   (hash en flux, persistance groupée, rétention) non encore implémentées.
-- Le nettoyage de `worldLocks` est corrigé (promesse chaînée stockée et comparée) et
-  `WORLD_DELETE` passe par `simulationDeleteWorld()`. En 3D-C, ajouter l'annulation explicite
-  des `pendingComputes` **dès l'appel, avant toute attente de verrou** (arbitrage P5), et non
-  seulement avant de relâcher le verrou du monde.
+- Le nettoyage de `worldLocks` est corrigé (promesse chaînée stockée et comparée),
+  `WORLD_DELETE` passe par `simulationDeleteWorld()` et l'annulation explicite des
+  `pendingComputes` a lieu **dès l'appel, avant toute attente de verrou** (arbitrage P5).
 - Linux restreint (AppArmor/userns) : `--no-sandbox` dev uniquement via `scripts/dev.mjs`,
   sans modifier `src/main/security/window.ts`.
 - Ne pas lancer check-deps, typecheck, tests et build en parallèle : sous contention, le test
@@ -322,7 +340,7 @@
   — frontière worker/main et anti double-tick.
 - `docs/CHARACTER_TICK_RULES.md` — protocole Phase 3B à étendre sans casser les garanties.
 - `src/shared/worker-protocol.ts`, `src/shared/canonicalization.ts`, `src/shared/decision-validation.ts` — contrats, canonicalisations et validation partagée, sans Node.
-- `src/main/services/tick-writer.service.ts`, `src/main/simulation/tick-compute.worker.ts` — frontière d'écriture et worker non branché ; point d'entrée de 3D-C3.
+- `src/main/services/tick-writer.service.ts`, `src/main/simulation/tick-compute.worker.ts`, `src/main/simulation/tick-compute-client.service.ts` — frontière d'écriture, worker et client branché en 3D-C3.
 - `tests/worker-tick-protocol.test.ts`, `tests/worker-tick-parity.test.ts`, `tests/worker-tick-golden-matrix.long.test.ts` — validation du protocole, parité et références étendues.
 - `docs/PHASE_3D_DESIGN.md` — référence centrale et découpage en tranches.
 - `docs/DECISION_HISTORY_SYSTEM.md`, `docs/WORKER_TICK_PROTOCOL.md`, `docs/SAFE_PERSISTENCE.md`, `docs/WORLD_STORE_REFACTORING.md`, `docs/DECISION_INSPECTOR_UI.md` — conception détaillée.
@@ -347,14 +365,11 @@ bash scripts/dev.sh
 
 ## Prochaine tâche recommandée
 
-1. Les tranches **3D-A, 3D-B, 3D-C1 et 3D-C2 sont terminées et validées**. Ne pas les recommencer.
-2. Attendre une **validation explicite distincte** pour démarrer **3D-C3** : intégration du
-   worker au manager, `pendingComputes`, compteur `requestId`, timeout fixe 30 s, doublons
-   et réponses tardives ignorés, `error`/`exit`, recréation paresseuse, marqueur interne
-   `origin: 'auto' | 'manual'`, annulation immédiate à la suppression (P5), scission de
-   `stepSimulation()` avec relecture d'horloge et `before` exporté après reprise du verrou
-   global. Aucun repli synchrone silencieux.
-3. Puis proposer **3D-C4** (documentation et validation finale), avec validation explicite.
-4. Ensuite seulement : 3D-D (IPC de lecture et inspecteur UI). La politique
-   `simulation_stopped` reste inchangée ; `forkFromStopped` reste reporté. Aucune purge,
-   aucun export, aucun LLM, aucune optimisation opportuniste de la persistance.
+1. Les tranches **3D-A, 3D-B et 3D-C1 à 3D-C4 sont terminées, validées et livrées**. Ne pas les recommencer.
+2. La mission s'arrête ici : ne pas démarrer **3D-D** (IPC de lecture et inspecteur UI) sans
+   validation explicite distincte. La politique `simulation_stopped` reste inchangée ;
+   `forkFromStopped` reste reporté. Aucune purge, aucun export, aucun LLM, aucune optimisation
+   opportuniste de la persistance.
+3. Limites ouvertes à documenter avant toute montée en charge : coût de `persist()` qui
+   réexporte toute la base, rétention de l'historique non implémentée, calibrage des seuils
+   de décision à valider par simulation longue dédiée.

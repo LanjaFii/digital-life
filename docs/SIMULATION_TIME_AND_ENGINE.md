@@ -268,7 +268,7 @@ flowchart LR
 
 - Le **worker planificateur** est implémenté depuis la Phase 3A : intervalles et signaux
   `tick` par monde, sans règle métier ni SQLite.
-- Le **worker de calcul** est **[Planifié 3D-C]** : il exécute uniquement
+- Le **worker de calcul** est implémenté depuis 3D-C3 : il exécute uniquement
   `computeCharacterTick()` et renvoie un résultat sérialisable avec un checksum calculé sur
   le noyau Golden Hash. Il ne touche ni SQLite ni l'UI. Le main valide, applique la
   transaction et persiste : c'est la frontière de confiance.
@@ -282,8 +282,8 @@ flowchart LR
   l'événement `simulation:status-changed` sont **implémentés**. Le canal
   `simulation:events` reste **[Planifié]** et n'existe pas encore : aucun bouton ne doit
   l'utiliser avant son implémentation réelle (règle AGENTS.md).
-- L'interface ne doit jamais bloquer : le calcul se fera dans le worker de calcul,
-  l'attente restera non bloquante dans le main (timeout fixe 30 s) et le rendu React est
+- L'interface ne doit jamais bloquer : le calcul s'exécute dans le worker de calcul,
+  l'attente reste non bloquante dans le main (timeout fixe 30 s) et le rendu React est
   indépendant du tick.
 
 ## 8. Tests à prévoir quand l'implémentation viendra

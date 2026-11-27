@@ -6,10 +6,10 @@
 > touchent plus directement au fichier ni à la transaction : ils passent par les
 > nouveaux services. Aucune réécriture générale n'a été tentée.
 >
-> Les sous-tranches 3D-C1 et 3D-C2 sont implémentées et validées depuis le
-> 2026-11-26 : protocole partagé, modules canoniques et `tick-writer.service.ts`
-> extrait, worker de calcul autonome mais non branché. L'intégration 3D-C3 et le
-> nettoyage final 3D-D restent à valider séparément.
+> Les sous-tranches 3D-C1 à 3D-C4 sont implémentées et validées : protocole partagé,
+> modules canoniques et `tick-writer.service.ts` extraits, worker de calcul branché
+> via `prepareTickInput()` / `commitTickResult()` et client dédié. Le nettoyage final
+> 3D-D reste à valider séparément.
 
 ## 1. État réel après 3D-B
 
@@ -128,8 +128,8 @@ direct n'a été introduit en 3D-C2.
 | 3 | 3D-B | `db-write-lock.service.ts`, mise sous verrou de toutes les mutations | livrée |
 | 4 | 3D-B/3D-D | `world-crud.service.ts`, `character-crud.service.ts`, `simulation-clock.service.ts` | reportée : façade stable conservée, mutations déjà verrouillées |
 | 5 | 3D-C1 | `worker-protocol.ts`, modules canoniques partagés, `tick-writer.service.ts` (appel synchrone) | livrée |
-| 6 | 3D-C2 | `tick-compute.worker.ts` autonome, parité et checksum | livrée, non branchée |
-| 6b | 3D-C3 | intégration manager, verrous et annulation | non commencée |
+| 6 | 3D-C2 | `tick-compute.worker.ts` autonome, parité et checksum | livrée |
+| 6b | 3D-C3 | `tick-compute-client.service.ts`, intégration manager, verrous et annulation | livrée |
 | 7 | 3D-D | nettoyage final de la façade et documentation | non commencée |
 
 Le report de l'étape 4 est un choix de réversibilité : déplacer le CRUD aurait
@@ -179,7 +179,8 @@ existants n'ont pas été modifiés pour s'adapter à la refactorisation.
 - Tous les imports publics existants restent valides.
 - À la livraison 3D-B, la suite était **264/264** (27 fichiers, benchmark et test long
   exclus) ; 21 tests 3D-B ont été ajoutés et le test long isolé passait **9/9**. Après
-  3D-C1/C2, la suite est **279/279** (30 fichiers, tests longs et benchmark exclus).
+  3D-C1/C2, la suite était **279/279** (30 fichiers) ; après 3D-C3/C4, elle est
+  **298/298** (32 fichiers, tests longs et benchmark exclus).
 - Aucun changement de schéma ni de valeur calculée par le moteur.
 - Golden Hash 18 scénarios byte-identique.
 - Aucune mutation de la façade n'échappe à `withDbWrite`.

@@ -1,15 +1,15 @@
 # Phase 3D — Consolidation du moteur
 
-> **Statut : conception validée. Les tranches 3D-A, 3D-B, 3D-C1 et 3D-C2 sont implémentées et
-> validées ; 3D-C3, 3D-C4 et 3D-D restent planifiées et exigent une validation distincte.** HEAD avant conception 3D :
+> **Statut : conception validée. Les tranches 3D-A, 3D-B, 3D-C1, 3D-C2, 3D-C3 et 3D-C4 sont
+> implémentées et validées ; seule 3D-D reste planifiée.** HEAD avant conception 3D :
 > `276384eb993e91f80a309e0864a54dbe1fdf8d53`, identique à `origin/main`. HEAD après
 > publication de la conception : `e060a07a71cad43932444ae56a00de13d72a1cf0`.
 > Ce document sert de référence d'architecture pour les tranches 3D-A à 3D-D.
 >
 > **Les arbitrages définitifs de l'audit de préparation 3D-C ont été validés le 2026-11-26**
-> (§2.1 et §10). Les sous-tranches **3D-C1 et 3D-C2 sont livrées** (protocole, canonicalisation
-> partagée, frontière d'écriture, worker autonome non branché). **3D-C3 attend une validation
-> explicite distincte** ; aucune intégration au manager n'est en place.
+> (§2.1 et §10). Les sous-tranches **3D-C1 à 3D-C4 sont livrées** : protocole, canonicalisation
+> partagée, frontière d'écriture, worker de calcul, intégration au manager, verrous et
+> documentation finale. Le calcul direct reste la référence de test, jamais un repli de production.
 
 ## 1. Périmètre retenu
 
@@ -140,18 +140,18 @@ Chaque tranche est autonome : tests, documentation, validation séquentielle (`c
 
 - **Objectif** : déplacer uniquement le calcul pur du tick hors du thread principal, sans changer une seule valeur calculée.
 - **Périmètre global** : second worker, protocole versionné `protocolVersion = 1`, corrélation par `requestId`, validation complète dans le main, verrou monde étendu, annulation à la suppression, Golden Hash préservé. Aucune transaction dans le worker, aucun changement de schéma SQLite, aucun canal IPC ni changement UI.
-- **Règle de production** : aucun mode hybride. Jusqu'à 3D-C3, le calcul direct Phase 3C reste le chemin de production ; le worker livré en 3D-C2 n'est pas branché. Après intégration, le calcul direct restera comme référence de test uniquement, jamais comme repli en production.
+- **Règle de production** : aucun mode hybride. Depuis 3D-C3, le calcul du tick passe par le worker de calcul ; `stepSimulation()` du store reste la référence synchrone pour les tests de parité uniquement, jamais comme repli en production.
 - **Découpage validé** :
 
 | Sous-tranche | Contenu | Critère d'acceptation |
 |---|---|---|
 | **3D-C1 — Fondations contractuelles** | `src/shared/worker-protocol.ts` (nouveau) avec `ComputeTickRequest`, `ComputeTickResponse`, versions et validateurs purs ; extraction de `canonicalize()`, `collectRuleIds()` et de la sérialisation du noyau Golden Hash dans un module partagé sans Node, avec réexports depuis `decision-record.service.ts` ; extraction de `tick-writer.service.ts` derrière la façade inchangée, encore appelé **synchrone** par `stepSimulation()`. | Protocole validé (versions, champs, erreurs) ; un seul canonicaliseur de production et un seul noyau Golden Hash partagés ; 18 Golden Hash inchangés ; façade et hooks `_...ForTests` inchangés ; aucun fichier IPC/UI/schéma modifié. |
-| **3D-C2 — Worker non branché** | `src/main/simulation/tick-compute.worker.ts` (nouveau), résolution du chemin du second worker, harnais `worker_threads` avec point d'injection contrôlé, réponses `result`/`error`, checksum sur le noyau Golden Hash. La production utilise toujours le calcul direct. | Messages valides/invalides et versions inconnues rejetés ; entrée identique → sortie identique ; aucun état résiduel entre requêtes ; checksum identique côté main et aux 18 hashes ; aucun SQLite, IPC ni fichier ouvert par le worker. |
+| **3D-C2 — Worker autonome** | `src/main/simulation/tick-compute.worker.ts` (nouveau), résolution du chemin du second worker, harnais `worker_threads` avec point d'injection contrôlé, réponses `result`/`error`, checksum sur le noyau Golden Hash. À cette sous-tranche, la production utilisait encore le calcul direct ; le branchement est réalisé en 3D-C3. | Messages valides/invalides et versions inconnues rejetés ; entrée identique → sortie identique ; aucun état résiduel entre requêtes ; checksum identique côté main et aux 18 hashes ; aucun SQLite, IPC ni fichier ouvert par le worker. |
 | **3D-C3 — Intégration et verrous** | `pendingComputes`, compteur `requestId`, timeout fixe 30 s, doublons/tardifs ignorés, gestion `error`/`exit`, recréation paresseuse, marqueur `origin: 'auto' \| 'manual'`, annulation immédiate à la suppression, scission de `stepSimulation()` en snapshot sous global / attente sous verrou monde / reprise globale avec `expected`, `before`, transaction courte et persistance. | Aucune écriture concurrente du même monde ; aucun tick partiel ; suppression pendant calcul sans écriture tardive ; timeout et crash rejettent l'IPC manuelle sans laisser `ipcMain.handle` sans réponse ; erreur automatique sans écriture ni changement de statut ; relecture d'horloge et restauration 3D-B intactes. |
 | **3D-C4 — Documentation et validation finale** | Mise à jour des documents concernés, puis séquence complète : check-deps → typecheck 4 configs → tests ciblés → suite complète → test long isolé → build → revue du diff. | 18 Golden Hash ordinaires verts et matrice complète en test long isolé ; suite complète verte ; build OK ; aucun secret ni fichier généré versionné ; commit et push sans force. |
 
-- **Statut des sous-tranches (2026-11-26)** : 3D-C1 **livrée**, 3D-C2 **livrée** (worker non branché), 3D-C3 et 3D-C4 **non commencées**. En 3D-C2, la résolution du chemin du worker et le harnais `worker_threads` restent volontairement côté tests : le point d'injection production n'arrive qu'avec 3D-C3, afin d'éviter tout branchement ou repli implicite anticipé.
-- **Validation** : 3D-C3 nécessite une validation explicite distincte ; les sous-tranches suivantes seront proposées une par une, sans démarrage anticipé.
+- **Statut des sous-tranches (2026-11-27)** : 3D-C1 **livrée**, 3D-C2 **livrée**, 3D-C3 **livrée** (client de calcul, `pendingComputes`, verrous, origine, suppression sécurisée), 3D-C4 **livrée** (documentation et validation finale). Le client de calcul isolé dans `src/main/simulation/tick-compute-client.service.ts` est le seul point d'injection production du worker ; aucun repli synchrone n'est prévu.
+- **Validation** : 3D-C3/C4 ont été validées par check-deps, typecheck 4 configs, suite complète, Golden Hash, matrice longue isolée et build, puis livrées sur `origin/main` sans force. 3D-D reste à valider séparément avant tout démarrage.
 - **Exclusions globales** : SQLite dans le worker, LLM, événements Phase 5, compression des résultats, optimisation opportuniste de la persistance.
 
 ### 4.4 Tranche 3D-D — IPC et interface minimale
@@ -245,7 +245,7 @@ La suppression d'un monde doit être séquencée dans cet ordre (arbitrage P5) :
 
 Aucune réponse tardive, y compris après timeout, ne peut valider un tick : le tombeau et l'absence d'entrée dans `pendingComputes` sont contrôlés avant validation et avant `BEGIN`. L'annulation ne dépend pas de l'acquisition du verrou monde, ce qui évite qu'un timeout laisse un calcul encore pending.
 
-Le nettoyage actuel de `worldLocks` est incorrect : la map stocke `previous.then(() => current)` alors que le `finally` compare `current`. Il faut stocker la promesse chaînée réellement comparée, par exemple `const chained = previous.then(() => current); worldLocks.set(worldId, chained); … if (worldLocks.get(worldId) === chained) worldLocks.delete(worldId);`.
+Le nettoyage de `worldLocks` est correct depuis la tranche 3D-B : la map stocke la promesse chaînée réellement comparée (`const chained = previous.then(() => current, () => current); worldLocks.set(worldId, chained); … if (worldLocks.get(worldId) === chained) worldLocks.delete(worldId);`). La variante sans gestion du rejet de la promesse précédente (`previous.then(() => current)`) n'est pas retenue, car elle laisserait un waiter bloqué si le titulaire précédent échoue.
 
 Le handler IPC `WORLD_DELETE` ne doit plus appeler `simulationClearWorld()` après coup. Un helper manager dédié, par exemple `simulationDeleteWorld()`, garantit cet ordre. Le comportement public `deleteWorld()` reste disponible comme service interne.
 
@@ -360,7 +360,7 @@ La principale erreur serait de faire marcher le worker et la persistance en para
 11. **Timeout et concurrence (P8)** : constante 30 s ; entrée `pending` retirée avant rejet ; doublons et réponses tardives ignorés ; aucun retry automatique.
 12. **Golden Hash** : 18 scénarios historiques en suite ordinaire ; matrice complète 6 profils × 1/2/10/50 personnages × 24/72/168/720 ticks en test long isolé.
 
-Aucune de ces décisions n'autorise un appel réseau, une modification de l'UI, un changement de schéma SQLite, un benchmark ou un déplacement du calcul hors du main avant la validation explicite de 3D-C3. 3D-C1 et 3D-C2 ont respecté cette limite : le worker existe mais n'est pas branché.
+Aucune de ces décisions n'autorise un appel réseau, une modification de l'UI, un changement de schéma SQLite ou un benchmark. Le calcul a été déplacé hors du main uniquement dans la tranche 3D-C3 validée ; 3D-C1 et 3D-C2 avaient respecté la limite en livrant le worker sans branchement. 3D-D reste soumise à une validation explicite distincte.
 
 ## 11. Références
 
